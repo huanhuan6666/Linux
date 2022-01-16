@@ -39,8 +39,7 @@ int main()
   * 可以通过`ll`命令查看，d-rwx-rwx-rwx，d代表是否为目录，后面三个即不同用户组的读、写、执行。三个**八进制数**，全权限为`777`。
   * 普通文件的设置方式是通过`~umask & 0666`，`umask`直接命令行输入就会显示，一般为`0022`或者`0002`。因为要取反，因此`umask`的值越大，文件的权限越少。
 
-`fputc();`
-`fgetc();`
+`fputc();fgetc();`
 * 看man手册会发现，fgetc == getc == getchar(stdin)，fgetc和getc的函数原型都是`int ..(FILE* stream)`，而getchar只是将参数设置成`stdin`而已。
 * putc(c) == fputc(c) == putchar(c, stdout)，和上一条类似， 其实`fprintf(stderr, ....)`也类似，`printf`只是默认输出流为`stdout`。
 * 看man用到函数时一定要把相应的**头文件**包含进来，比如`stdlib.h`不包含也能运行但是会警告，但是隐患很多。
@@ -71,7 +70,7 @@ int main(int argc, char** argv)
 }
 ```
 `fputs();fgets();`
-* fgets在man手册里直接说明非常危险了，要用的话直接用`fgets(char *s, int size, FILE *stream)`，也就是`fgets(.., .., stdin);`从标准输入读取。fgets会在读取size-1个字符或者读到'\n'的时候停止，在尾部加上一个`\0`。每个文件末尾都**默认有个换行符**，即使看不到，因此fgets一定可以正常停止。
+* gets在man手册里直接说明非常危险了，要用的话直接用`fgets(char *s, int size, FILE *stream)`，也就是`fgets(.., .., stdin);`从标准输入读取。fgets会在读取size-1个字符或者读到'\n'的时候停止，在尾部加上一个`\0`。每个文件末尾都**默认有个换行符**，即使看不到，因此fgets一定可以正常停止。
 * `fputs(const char *s, FILE *stream)`;可以将字符串输入到任意文件中
 
 `fread();fwrite();`
@@ -90,13 +89,13 @@ while((n = fread(buf, 1, 1024, fp)) > 0)
 `fseek();ftell();rewind();`
 * 用来操作**文件位置指针**
 ```cpp
- int fseek(FILE *stream, long offset, int whence); //将文件位置指针移动到whence再偏移offset的位置，whence可以取SEEK_SET, SEEK_CUR,SEEK_END，成功返回0，失败返回-1并且设置erron
+ int fseek(FILE *stream, long offset, int whence); //将文件位置指针移动到whence再偏移offset的位置，whence可以取SEEK_SET, SEEK_CUR,SEEK_END，成功返回0，失败返回-1并且设置errno
  long ftell(FILE *stream); //返回当前文件位置指针的字节数
  void rewind(FILE *stream); //将流fp的文件位置指针设置到文件开始处，相当于fseek(fp, 0L, SEEK_SET); 0L表示为long类型
 ```
-* feek和ftell还有个问题，由于偏移位置是long类型(32bit)，那么文件大小超过2GB就会出现负数。。因为补码首位是负权，因为这个函数太古老了，但是也遵循C99
+* feek和ftell还有个问题，由于偏移位置是long类型(32bit)，那么文件大小超过2GB就会出现负数。。因为补码首位是负权，这确实是个**缺陷**，因为这个函数太古老了，但是遵循C99
 `fflush(FILE* stream);`
-* 刷新输出缓冲区，输出缓冲区是碰见换行符'\n'才刷新输出的，因此下面的程序：
+* 刷新输出缓冲区，标准输出缓冲区是碰见换行符'\n'才刷新输出的，因此下面的程序：
 ```cpp
 int main()
 {

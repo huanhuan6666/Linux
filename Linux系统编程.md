@@ -283,6 +283,151 @@ close(fd); //把原来的就关了吧
 `ls -a /dev/fd`，这里显示的就是`ls`进程的文件描述符信息。
 
 ## 文件系统
+* 类ls命令的实现，贯穿这一部分的所有内容。包括选项：-a(显示隐藏文件) -i(显示文件inode号) -l(展示用户和组的名称) -n(like -l,展示用户和组的ID)
+* 终端命令的基本格式: `cmd --长格式 -短格式 非选项的传参`。比如ls --all等同于ls -a，传参可以文件路径名。
+* 如何创建或者删除一个文件名为"-a"的文件？touch -a会直接把-a解析成选项并报错**缺少文件操作数**，这时候可以用个--占位符把选项位置占过去:`touch -- -a`就可以了，或者把路径写下来`touch ./-a`。删除也同样`rm -- -a`或者`rm ./-a`.
+### 目录和文件
+* 获取文件的属性
+ `stat, fstat, lstat`系统调用
+ stat获取的**就是文件的inode信息**，只不过把文件inode信息放到一个stat结构体里的对应字段里了，通过inode的手册即可得知。
+```cpp
+int stat(const char *pathname, struct stat *statbuf);
+int fstat(int fd, struct stat *statbuf);
+int lstat(const char *pathname, struct stat *statbuf);
+```
+这几个函数又是典型的输入指针捏，而且unix的函数命名是很有规范的，fstat的参数就是个文件描述符，stat就是个文件名，lstat和stat参数一样但是对于符号**链接文件**的处理不同。
+stat结构体如下：
+```cpp
+struct stat {
+	dev_t     st_dev;         /* ID of device containing file  包含该文件的设备号*/
+	ino_t     st_ino;         /* Inode number  文件inode号*/
+	mode_t    st_mode;        /* File type and mode 文件的权限信息，就是drwxr--r--的那个*/
+	nlink_t   st_nlink;       /* Number of hard links 硬链接数*/
+	uid_t     st_uid;         /* User ID of owner 用户id*/
+	gid_t     st_gid;         /* Group ID of owner 组id*/
+	dev_t     st_rdev;        /* Device ID (if special file) 如果文件确实是个设备的话，设备的ID号*/
+	off_t     st_size;        /* Total size, in bytes 大小字节数*/
+	blksize_t st_blksize;     /* Block size for filesystem I/O 文件系统规定的块大小*/
+	blkcnt_t  st_blocks;      /* Number of 512B blocks allocated 此文件占用的块数*/
+
+	/* Since Linux 2.6, the kernel supports nanosecond
+	  precision for the following timestamp fields.
+	  For the details before Linux 2.6, see NOTES. */
+
+	struct timespec st_atim;  /* Time of last access */
+	struct timespec st_mtim;  /* Time of last modification */
+	struct timespec st_ctim;  /* Time of last status change */
+
+   #define st_atime st_atim.tv_sec      /* Backward compatibility */
+   #define st_mtime st_mtim.tv_sec
+   #define st_ctime st_ctim.tv_sec
+};
+```
+* 同样可以用stat命令来获取文件信息，和上面字段都可以对应上，stat命令就是用上面的stat()函数封装的。
+```cpp
+  文件：c.txt
+  大小：46        	块：8          IO 块：4096   普通文件
+设备：801h/2049d	Inode：400481      硬链接：1
+权限：(0644/-rw-r--r--)  Uid：( 1000/   njucs)   Gid：( 1000/   njucs)
+最近访问：2022-01-16 12:58:32.530000000 +0800
+最近更改：2022-01-16 12:58:28.894000000 +0800
+最近改动：2022-01-16 12:58:28.894000000 +0800
+```
+* 注意st_size文件大小，只是文件的一个**属性**而已，而具体在磁盘上占了多少空间看的是st_blsize和st_blokcs，上面就是8* 4K = 32KB了，但是文件的实际字节数只有46B. 
+* **空洞文件**：
+```cpp
+int main(int argc, char **argv)
+{
+	int fd = 0;
+	if(argc != 2)
+	{
+		fprintf(stderr, "Usage: %s<pathname>", argv[0]);
+		exit(1);
+	}
+	umask(0000);
+	fd = open(argv[1], O_WRONLY|O_CREAT|O_TRUNC, 0644);
+
+	lseek(fd, 5LL*1024LL*1024LL*1024LL, SEEK_SET);
+	write(fd, "", 1); //注意这句一定不能少，否则就彻底为空洞文件，st_size=0
+	close(fd);
+	exit(0);
+}
+```
+`./big big.txt`获取其文件状态如下：
+```
+文件：big.txt
+大小：5368709121	块：8          IO 块：4096   普通文件
+```
+也就是size为5G，但是存在磁盘上只占32K。如果不写最后的`write(fd, "", 1);`的话，那么最后size=0，块数也=0。lseek移动超出文件长度的话，中间全部用`\0`来填写。并且这部分内容是**不会写到磁盘上的**，因为全0也没啥好写的反而占用空间。因此要深刻理解unix环境下**文件的size属性和实际上占用磁盘大小的区别**。
+
+> 以及man手册的example也摘一下吧，看看人家代码是怎么写的:
+> ```cpp
+> int main(int argc, char *argv[])
+> {
+>   struct stat sb;
+>   if (argc != 2) {
+>       fprintf(stderr, "Usage: %s <pathname>\n", argv[0]); //不像下面的有errno可以用，输出到stderr比较好因为不用缓冲>
+>      exit(EXIT_FAILURE);
+>   }
+>
+>   if (lstat(argv[1], &sb) == -1) {
+>       perror("lstat"); //因为系统调用一般都设置了errno
+>       exit(EXIT_FAILURE);
+>   }
+>   exit(EXIT_SUCCESS);
+> }
+> ```
+
+用stat系统调用实现一下获取文件长度
+```cpp
+off_t flen(const char *name)
+{
+	struct stat_t res;
+	if(stat(name, &res) < 0)
+	{
+		perror("stat");
+		exit(1);
+	}
+	return res.st_size;
+}
+int main(int argc, char *argv)
+{
+	if(argc < 2)
+	{
+		fprintf(stderr, "Usage: ...");
+		exit(1);
+	}
+	fprintf(stdout, "%lld", flen(argv[1]));
+	exit(0);
+}
+```
+* 文件访问权限
+stat获取的是文件的inode信息放到stat结构体的对应字段上了，因此很多细节定义都在inode的手册里`man 7 inode`。
+对于文件类型和访问权限对应stat结构体里的st_mode字段，给出了各种宏类型以及使用例：
+```cpp
+//Thus, to test for a regular file (for example), one could write:
+stat(pathname, &sb);
+if ((sb.st_mode & S_IFMT) == S_IFREG) {
+/* Handle regular file */
+}
+```
+以及更直接的检测类型的宏：
+```cpp
+S_ISREG(m)  is it a regular file?
+S_ISDIR(m)  directory?
+```
+**文件类型一共七种**：目录文件d，常规文件-，字符设备文件c，块设备文件b，符号链接文件l，socket文件s，管道文件p
+
+* umask相关
+* 文件权限的更改
+* 粘位
+* 经典文件系统:FAT,UFS
+* 硬链接和符号链接
+* 时间相关命令utime
+* 目录的创建和销毁
+* 更改当前工作目录
+* 分析目录/读取目录内容
+
 
 ## 并发
 多进程并发(信号量)

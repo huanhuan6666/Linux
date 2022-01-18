@@ -630,7 +630,7 @@ umask相关
 
 
 
-#### 其他命令和系统调用
+### 其他命令和系统调用
 
 * 时间相关命令utime
 
@@ -709,7 +709,56 @@ struct dirent {
 ```
 可以看到返回的`dirent`**目录项结构体**，最重要的就是`ino_t`和`d_name`即inode号和文件名。像读文件那样一条条readdir()输出dirent结构体里的d_name即可完成glob例子实现的效果。
 
-**练习**：`du`命令可以获取文件或者目录所占块的个数，自己实现一个`mydu`，达到类似的效果，涉及到各种库函数的使用以及递归和简单的递归优化。见另一个文件夹mydu
+**练习**：`du`命令可以获取文件或者目录所占块的个数，自己实现一个`mydu`，达到类似的效果，涉及到各种库函数的使用以及递归和简单的递归优化。见另一个文件夹mydu。
+
+### 系统数据文件和信息
+* `/etc/passwd`即查看系统的用户详细信息，包括用户ID，组ID等等。在Linux环境下存放在`/etc/passwd`目录下面，但是在其他系统中的实现不同，因此提供标准函数：
+```cpp
+struct passwd *getpwnam(const char *name); //根据用户名查询用户信息
+struct passwd *getpwuid(uid_t uid); //根据uid查询用户信息
+struct passwd {
+	char   *pw_name;       /* username */
+	char   *pw_passwd;     /* user password */
+	uid_t   pw_uid;        /* user ID */
+	gid_t   pw_gid;        /* group ID */
+	char   *pw_gecos;      /* user information */
+	char   *pw_dir;        /* home directory */
+	char   *pw_shell;      /* shell program */
+}; //用户信息结构体passwd
+```
+passwd结构体里的字段和`/etc/passwd`文件里记录的字段一一对应。一般来说`root`用户的`uid = 0`。下面是通过输入用户uid来查询用户名的例子，使用getpwuid标准函数：
+```cpp
+int main(int argc, char **argv)
+{
+	struct passwd *pass;
+	if(argc < 2)
+	{
+		fprintf(stderr, "Usage...\n");
+		exit(1);
+	}
+	pass = getpwuid(atoi(argv[1]));
+	puts(pass->pw_name);
+	exit(0);
+}
+```
+* `/etc/group`查询组信息，和用户信息类似的标准函数:
+```cpp
+struct group *getgrnam(const char *name);
+struct group *getgrgid(gid_t gid);
+struct group {
+       char   *gr_name;        /* group name */
+       char   *gr_passwd;      /* group password */
+       gid_t   gr_gid;         /* group ID */
+       char  **gr_mem;         /* NULL-terminated array of pointers
+				  to names of group members */
+};
+```
+同样`root`用户的`gid = 0`，同样也是返回一个指针，即被调用函数分配内存。
+* `/etc/shadow`
+这里就需要区分`sudo`命令和`su`命令，以及普通用户和root用户的区别了。root用户是真正的超级用户，如果要真正切换到root用户需要使用`su`命令并且输入root用户的密码，一般是不知道的。。
+而平时常用的`sudo`命令需要输入的是**当前用户的密码**，而不是root用户的密码，能够暂时切换到root用户执行东西，但是有时间限制，Ubuntu默认为15分钟。
+`/etc/shadow`就需要root用户才能查看
+* 时间戳
 ## 并发
 
 多进程并发(信号量)

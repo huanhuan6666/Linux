@@ -784,6 +784,36 @@ struct timespec st_atim;  /* Time of last access */
 struct timespec st_mtim;  /* Time of last modification */
 struct timespec st_ctim;  /* Time of last status change */
 ```
+time()系统调用，从系统得到时间戳`time_t`类型，是个大整数。还有其他相关：
+```cpp
+time_t time(time_t *tloc); //返回一个大整数，同时也间接修改参数的那个指针，用哪个都可以
+struct tm *gmtime(const time_t *timep); //是tm结构体，有几个字段，把一个time_t类型的东西转换成tm结构体。
+time_t mktime(struct tm* tm); //把一个tm结构体转换成time_t类型
+size_t strftime(char *s, size_t max, const char *format, const struct tm *tm); //format格式化字符串，和printf那一批函数异曲同工，%Y%M%D啥的。从tm结构体里取字段格式化后放到s里，s和max就是个内存打包。
+```
+gmtime返回的指针指向静态区，因此后面的调用会冲掉之前的结果。mktime函数的参数不是const，因此mktime可以自动检查tm结构体的溢出情况并且调整，比如13月35日这样的。
+下面是一个典中典的例子：
+```cpp
+int main()
+{
+	int count = 0;
+	FILE *fp = NULL;
+	time_t t;
+	struct tm *tm;
+	char buf[1024] = {0};
+	fp = fopen("file.txt", "a+"); //附加写，注意本例用的全是标准IO，这就涉及到缓冲区的问题
+	while(fgets(buf, 1024, fp) != NULL) count++; //求前面有多少行
+	while(1)
+	{
+		time(&t); //获取当前时间
+		tm = gmtime(&t); //放到时间结构体里
+		fprintf(fp, "%d  %d-%d-%d  %d:%d:%d\n", count++, 1900+tm->tm_year, 1+tm->tm_mon,....); //注意tm_year从1900年开始，tm_mon从0开始
+		//fflush(fp); //刷新缓冲区
+		sleep(1); //一秒写一次
+	}
+}
+```
+以为这样就没事了，那么我们另开一个终端，用`tail -f file.txt`命令查看文件不断append的内容。发现一直没有东西：这个原因就是标准IO的缓冲，因为除了终端设备比如stdout是行缓冲外，其余文件流都是**全缓冲**，缓冲区不满就不写文件，因此要么`fflush(fp)`不断刷新缓冲区，要么直接系统调用IO。
 ## 并发
 
 多进程并发(信号量)

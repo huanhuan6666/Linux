@@ -1,4 +1,4 @@
-实现如下：
+du命令就是返回一个文件或者目录所占空间大小，涉及到目录的递归，自己实现如下：
 ```cpp
 #include<stdlib.h>
 #include <sys/types.h>

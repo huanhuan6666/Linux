@@ -361,9 +361,9 @@ close(fd); //把原来的就关了吧
   stat获取的**就是文件的inode信息**，只不过把文件inode信息放到一个stat结构体里的对应字段里了，通过inode的手册即可得知。
 
 ```cpp
-int stat(const char *pathname, struct stat *statbuf);
+int stat(const char *pathname, struct stat *statbuf); //对于符号链接文件获取所指向文件的属性
 int fstat(int fd, struct stat *statbuf);
-int lstat(const char *pathname, struct stat *statbuf);
+int lstat(const char *pathname, struct stat *statbuf); //对于符号链接文件获取符号链接文件本身的属性
 ```
 
 这几个函数又是典型的输入指针捏，而且unix的函数命名是很有规范的，fstat的参数就是个文件描述符，stat就是个文件名，lstat和stat参数一样但是对于符号**链接文件**的处理不同。
@@ -640,14 +640,75 @@ umask相关
 
 * 更改当前工作目录
 
+  pwd命令，封装了getcwd()系统调用
+
   cd命令，封装了chdir()系统调用，以及fchdir()系统调用，可以切换进程的工作目录。
 
   这就涉及到安全问题，chroot**假根技术**将让进程认为当前工作目录就是根目录，但是chdir命令可能改变工作目录到真正的根上，也就是**chroot穿越**，很容易造成安全隐患。
 
 * 分析目录/读取目录内容
+  **用golb()函数进行目录解析**
+  `glob()`库函数，使用`man 7 glob`的shell命令一样的方式，对文件进行**通配符匹配**，函数原型如下：
+  ```cpp
+	int glob(const char *pattern, int flags,
+                int (*errfunc) (const char *epath, int eerrno), //显然这是个函数指针，可以自定义回调
+                glob_t *pglob);
+	int globfree(glob_t *pglob); //显然glob_t结构体是分配在堆区的，是个输出指针
+	typedef struct {
+               size_t   gl_pathc;    /* Count of paths matched so far  */     //符合匹配的文件个数和文件名的数组
+               char   **gl_pathv;    /* List of matched pathnames.  */        //这两项非常像main函数的argc和argv，字符串的个数和字符串指针
+               size_t   gl_offs;     /* Slots to reserve in gl_pathv.  */
+           } glob_t;
+  ```
+	> * 即用*表示匹配多个字符，用?匹配单个字符，
+	> * 用[...]表示范围匹配**单个**字符，比如`[][!]`表示匹配`] [ !`这三个字符；`[A-Fa-f0-9]`表示`[AB..Fab..f012...9]`，注意第一个[之后不能紧跟!
+	> * 否则就匹配方括号**之外**的**单个**字符，如`[!0-9]`表示不匹配数字
+用glob函数匹配文件示例：匹配/etc目录下a开头的.conf文件：
+```cpp
+#define PATTERN "/etc/a*.conf"
 
-  pwd命令，封装了getcwd()系统调用
+int myfunc (const char *epath, int eerrno)  //自定义回调函数，把出错信息输出出来
+{
+	puts(epath);
+	fprintf(stderr, "ERROR MSG: %s\n", strerror(eerrno));
+	return eerrno;
+}
+int main()
+{
+	glob_t tmp;
+	if(glob(PATTERN, 0, myfunc, &tmp) != 0)
+	{
+		perror("glob");
+		exit(1);
+	}
+	int count = tmp.gl_pathc, i = 0;
+	char **allpath = tmp.gl_pathv;
+	for(i = 0; i<count;i++)
+	{
+		puts(allpath[i]);
+	}
+	globfree(&tmp);	
+	exit(0);
+}
+```
+解析整个目录就更简单了，只需要把PATTERN设置成`/etc/*`，即可解析etc目录下的所有内容，**不包括隐藏**，因为这只是个模式`*`而已。
+  **直接用目录文件的操作函数进行解析**：
+  `opendir(), fdopendir(), closedir(), readdir()`返回的是一个`DIR *`的目录流结构体，类似于`FILE *`文件流，还有其他相关的结构体看man手册吧，这里大致说一下`readdir()`函数：
+```cpp
+#include <dirent.h>
+struct dirent *readdir(DIR *dirp);
+struct dirent {
+	ino_t          d_ino;       /* Inode number */
+	off_t          d_off;       /* Not an offset; see below */
+	unsigned short d_reclen;    /* Length of this record */
+	unsigned char  d_type;      /* Type of file; not supported
+				      by all filesystem types */
+	char           d_name[256]; /* Null-terminated filename */
+};
+```
+可以看到返回的`dirent`**目录项结构体**，最重要的就是`ino_t`和`d_name`即inode号和文件名。像读文件那样一条条readdir()输出dirent结构体里的d_name即可完成glob例子实现的效果。
 
+**练习**：`du`命令可以获取文件或者目录所占块的个数，自己实现一个`mydu`，达到类似的效果，涉及到各种库函数的使用以及递归和简单的递归优化。见另一个文件夹mydu
 ## 并发
 
 多进程并发(信号量)

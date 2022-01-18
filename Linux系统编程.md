@@ -755,10 +755,35 @@ struct group {
 ```
 同样`root`用户的`gid = 0`，同样也是返回一个指针，即被调用函数分配内存。
 * `/etc/shadow`
-这里就需要区分`sudo`命令和`su`命令，以及普通用户和root用户的区别了。root用户是真正的超级用户，如果要真正切换到root用户需要使用`su`命令并且输入root用户的密码，一般是不知道的。。
+这里就需要区分`sudo`命令和`su`命令，以及普通用户和root用户的区别了。root用户是真正的超级用户，如果要真正切换到root用户需要使用`su`命令并且输入root用户的密码，一般是不知道的；也可以用`sudo -i`输入当前用户的命令，切换到root用户。
 而平时常用的`sudo`命令需要输入的是**当前用户的密码**，而不是root用户的密码，能够暂时切换到root用户执行东西，但是有时间限制，Ubuntu默认为15分钟。
-`/etc/shadow`就需要root用户才能查看
+`/etc/shadow`就需要root权限才能查看，可以看到每个用户加密后的密码，比如123asd=.加密后就是下面中间一大串的东西
+```cpp
+njucs:$6$dJpuCzZM$IrhOK/T7zWwj87v0GXPgZFv/sg.9npEPRDKV5Njgp4ha/XxsaOdMvyVXUVxzXknDib3p4Glf/eFVNKwxolNyg1:18696:0:99999:7:::
+```
+第一对$之间的6表示的是加密方式，代表SHA-512。第二对$中间的内容是杂质串，然后将原串和杂质串一起进行6表示的加密算法得到后面的密文。
+**获取shadow文件项的库函数**：
+```cpp
+struct spwd *getspnam(const char *name);
+char *crypt(const char *key, const char *salt);
+char *getpass(const char *prompt); //必须用root用户才能执行这个函数，否则会段错误
+```
+getspnam通过用户名获取`spwd`结构体，和之前的类似，结构体字段和shadow文件里的对应，获取的是**密文**。
+crypt加密函数，key就是原串，salt就是**杂质串**，最后得到加密后的**密文**。salt的说明如下，也就是说salt必须遵守格式`$id$salt$encrypted`，他会自己截取前三个$之前的部分作为加密方式和杂质串。
+getpass输入密码的时候不显示到屏幕上，向linux那样。上古函数，不建议使用obsolete。prompt是需要输出的提示。
+```cpp
+If salt is a character string starting with the characters "$id$"  fol‐
+lowed by a string optionally terminated by "$", then the result has the
+form:
+      $id$salt$encrypted
+```
 * 时间戳
+每一个文件都有三个时间属性，在之前的stat提到过。而ls显示的mtime就是最近一次修改时间
+```cpp
+struct timespec st_atim;  /* Time of last access */
+struct timespec st_mtim;  /* Time of last modification */
+struct timespec st_ctim;  /* Time of last status change */
+```
 ## 并发
 
 多进程并发(信号量)

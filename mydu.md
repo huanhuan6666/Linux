@@ -71,7 +71,7 @@ int main(int argc, char **argv)
 ```cpp
 int64_t mydu(const char *path)
 {
-  static struct stat statres; //静态区优化
+ 	static struct stat statres; //静态区优化
 	glob_t globres;
 	static char dirname[1024]; //静态区优化
 	int i;

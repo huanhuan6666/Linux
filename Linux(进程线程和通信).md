@@ -103,13 +103,149 @@ MAIL	邮件保存路径
 更准确详细的内存布局：
 ![image](https://user-images.githubusercontent.com/55400137/150064134-9f00848c-1a1a-4ffb-a53c-1ba5406fbc5b.png)
 
+**注意：**在.data段中还可以分为RO data只读数据段和RW data可读写数阶段，只读数据段包括全局const常量和字符串常量。
+
 * **内核区**
 这部分有个文章很清楚:[从环境变量到整个Linux进程运行](https://www.zhyingkun.com/markdown/environ/)
-### 关于库
-### 函数的跳转
-### 进程资源的获取和控制
 
+通过`ps`命令查看当前进程快照，`ps asf`命令查看所有进程的详细信息以及关系。**ps即`process snapshot`进程快照**
+然后可以用`pmap [pid]`命令查看进程号为pid的进程的**内存图**，**pmap即`process memory map`进程内存图**
+比如通过下面的代码来验证setenv函数是不是真的会在堆区开辟内存：
+```cpp
+#include<stdio.h>
+#include<stdlib.h>
+extern char **environ;
+int main()
+{
+	printf("before set: %p\n", getenv("PATH"));
+	setenv("PATH", "asdadasdadadasdasdasdasdadasdasda", 1);
+	printf("after set: %p\n", getenv("PATH"));
+	getchar(); //让进程停住
+	exit(0);
+}
+```
+输出如下:
+```cpp
+before set: 0x00007fff2a092e68
+after set: 0x000056011372a675
+```
+先通过`ps awf`查看进程号后再`pmap`查看内存空间如下：
+```cpp
+0000560111d07000      4K r-x-- test //可读可执行，代码段
+0000560111f07000      4K r---- test //只读数据段
+0000560111f08000      4K rw--- test //可读写数据段
+000056011372a000    132K rw---   [ anon ]
+00007f7862b62000   1948K r-x-- libc-2.27.so
+00007f7862d49000   2048K ----- libc-2.27.so
+00007f7862f49000     16K r---- libc-2.27.so
+00007f7862f4d000      8K rw--- libc-2.27.so
+00007f7862f4f000     16K rw---   [ anon ]
+00007f7862f53000    164K r-x-- ld-2.27.so
+00007f7863163000      8K rw---   [ anon ]
+00007f786317c000      4K r---- ld-2.27.so
+00007f786317d000      4K rw--- ld-2.27.so
+00007f786317e000      4K rw---   [ anon ]
+00007fff2a072000    132K rw---   [ stack ] //栈
+00007fff2a14d000     12K r----   [ anon ]
+00007fff2a150000      4K r-x--   [ anon ]
+ffffffffff600000      4K r-x--   [ anon ]
+ total             4516K
+```
+显然原来的环境变量地址在栈的上方，设置后的环境变量地址在可读写数据段的上方，也就是**堆**。
+### 关于库
+常用的几种库：动态库，静态库，共享库(手工装载库)。
+实际上动态库和共享库是一个东西，Linux上叫共享库，用**.so结尾**；Windows上叫动态库，结尾是典中典的**.dll**.
+有手工装载库的一套标准函数：
+```cpp
+void *dlopen(const char *filename, int flags); //用flags方式打开一个共享库文件，并返回一个句柄
+int dlclose(void *handle); //关闭共享库
+void *dlsym(void *handle, const char *symbol); //在共享库中寻找符号symbol，并返回入口地址
+```
+下面是给的例子，手工加载数学库(用LIBM_SO宏表示)并计算cos
+```cpp
+#include <stdio.h>
+#include <stdlib.h>
+#include <dlfcn.h>
+#include <gnu/lib-names.h>  /* Defines LIBM_SO (which will be a
+			      string such as "libm.so.6") */
+int main(void)
+{
+   void *handle;
+   double (*cosine)(double);
+   char *error;
+
+   handle = dlopen(LIBM_SO, RTLD_LAZY);
+   if (!handle) {
+       fprintf(stderr, "%s\n", dlerror());
+       exit(EXIT_FAILURE);
+   }
+
+   dlerror();    /* Clear any existing error */
+
+   cosine = (double (*)(double)) dlsym(handle, "cos");  
+   error = dlerror();
+   if (error != NULL) {
+       fprintf(stderr, "%s\n", error);
+       exit(EXIT_FAILURE);
+   }
+
+   printf("%f\n", (*cosine)(2.0));
+   dlclose(handle);
+   exit(EXIT_SUCCESS);
+}
+```
+注意`dlsym`在库中寻找`cos`函数的入口地址后，返回的是`void*`万能指针，直接强制类型**转换成函数指针**就OK啦。
+
+### 函数的跳转
+比如一个树形结构我们**寻找**一个结点用递归函数递归了一万层，那么我们其实没有必要再一层层退栈，这样效率太低了。而goto**关键字**不能跨函数跳转，不能跨函数实际上就是**不能跨函数栈**，而递归函数的每一层都有自己单独的栈，因此也不行。C++的异常处理机制倒是可以避免一层层退栈，但我们这里讲的是C。
+`setjmp()`和`longjmp()`提供了`nonlocal goto`，用于实现**跨函数的安全跳转**。
+`setjmp()`设置跳转点，也就是说其他语句**向这个地方跳**。因此有两个返回值，如果是刚设置跳转点的话setjmp返回0，从longjmp**跳回**的话返回值为非零。另一个类似两种返回值的函数是`fork()`。
+原型：
+```cpp
+int setjmp(jmp_buf env);   //需要设置一个jmp_buf类型的全局变量
+void longjmp(jmp_buf env, int val); //跳回到setjmp处时带一个返回值val
+```
+因此可不可以让longjmp的val返回一个0？手册上明确提到，如果传入0，那么将变成1.
+```cpp
+static jmp_buf save;
+void b()
+{
+	printf("%s begin\n", __FUNCTION__);
+	printf("%s jump!\n", __FUNCTION__);
+	longjmp(save, 6);
+	printf("%s end\n", __FUNCTION__);
+}
+void a()
+{
+	printf("%s begin\n", __FUNCTION__);
+	printf("%s call b", __FUNCTION__);
+	b();
+	printf("%s return from b", __FUNCTION__);
+	printf("%s end\n", __FUNCTION__);
+}
+int main()
+{
+	printf("%s begin\n", __FUNCTION__);
+	int ret = setjmp(save);   //设置跳转点
+	if(ret == 0)
+	{
+		printf("%s call a", __FUNCTION__);
+		a();
+		printf("%s return from a", __FUNCTION__);
+	}
+	else
+	{
+		printf("jump here code %d\n", ret);
+	}
+	exit(0);
+}
+```
+### 进程资源的获取和控制
+`ulimit -a`**命令**查看进程允许获取的各种资源上限。
+
+**系统调用函数**`getrlimit()`和`setrlimit()`，这两个函数一封装就成了`ulimit`命令
 ## 进程本身
+
 ## 并发
 ## 信号
 多进程并发(信号量)

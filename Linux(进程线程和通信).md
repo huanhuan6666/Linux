@@ -266,9 +266,165 @@ int main()
 ### 进程的产生：`fork()`函数
 `fork()`用**复制当前进程**的方式创建一个子进程，**执行一次返回两次**的函数典范，另一个就是上面提到的`setjmp()`函数。
 所谓复制就是全员拷贝，包括**当前程序的执行位置**都一样，也就是执行完fork()后，**父子进程都在`fork()`这一句返回**。然后我们根据返回值的不同来判断究竟是父还是子。
+#### fork()实例1
+* fork()函数之后父子进程谁先运行取决于**调度器的调度策略**，想让某个进程先跑可以采用`sleep(1)`这样的简单策略
+```cpp
+int main()
+{
+	printf("[%d]:begin!\n", getpid());
+	fflush(NULL); //!!!!! fork之前一定要加上刷新流的操作，后面有详细的案例！
+	int ret = fork();
+	if(ret < 0)
+	{
+		perror("fork()");
+		exit(1);
+	}
+	else if(ret == 0) //child
+	{
+		printf("[%d]: child working!\n", getpid());
+	}
+	else //parent
+	{
+		//sleep(1); //让父进程睡一会
+		printf("[%d]: parent working!\n", getpid());
+	}
+	printf("[%d]: end!\n", getpid());
+	getchar(); //让程序不停止
+	exit(0);
+}
+```
+上面代码执行后用`ps axf`看看进程关系如下：
+```cpp
+  PID TTY      STAT   TIME COMMAND
+ 1612 ?        Ss     0:00 /lib/systemd/systemd --user
+ 2162 ?        Ssl    0:23  \_ /usr/lib/gnome-terminal/gnome-terminal-server
+ 2171 pts/0    Ss     0:00  |   \_ bash
+ 3394 pts/0    T      0:00  |   |   \_ ./test
+ 3874 pts/0    R+     0:00  |   |   \_ ps axf
+ 2180 pts/1    Ss     0:00  |   \_ bash
+ 3869 pts/1    S+     0:00  |       \_ ./fork1
+ 3870 pts/1    S+     0:00  |           \_ ./fork1
+```
+* 可以看到**bash进程**创建了父进程，父进程又创建了子进程，父子进程名字**完全一样**。
+* 从图中可以看出父子进程关系，而对于所有定格写的进程比如`/lib/systemd/systemd --user`进程的父进程就是传说中的**`init`进程**。
+* init进程fork出了很多子进程，这些子进程再**自己**去fork新的子进程，而不是所有的进程都是init进程fork出来的，因此只把它称为祖先进程
+
+#### fflush的重要性
+现在我们讨论更深入的问题：上面的程序输出：
+```cpp
+[3869]: begin
+[3869]: parent working!
+[3869]: end!
+[3870]: child working!
+[3870]: end!
+```
+这是显然的，虽然顺序可能不同，但是可以确定：begin只打印一次而end打印两次。**然而**：
+如果`./fork1 > /tmp/out`将输出重定向到文件里，却会发现文件内容为：
+```cpp
+[3869]: begin
+[3869]: parent working!
+[3869]: end!
+[3869]: begin
+[3870]: child working!
+[3870]: end!
+```
+begin打印了两次？？？实验结果确实是这样的，肯定想到和标准IO的流缓冲区有关，但是我们的printf都煞费苦心加上了`\n`了啊。还是没懂！
+
+* stdout流是**行缓冲**，但是我们重定向到文件流里，普通文件流都是**全缓冲**的，因此父进程的`[3869]: begin`放到缓冲区里没有写到文件里，fork之后被**完全复制到子进程**，之后父子进程各自的缓冲区都是以`[3869]: begin`开头加上后面的内容，输出到文件中，所以有两句begin。
+
+* 因此有个[**重要的经验**]：在fork之前，一定要**先fflush(NULL)** 刷新所有已经打开的输出流。
+
+#### fork()实例2
+想要fork出多个子进程，要特别注意避免子进程也去fork，形成二叉树式的进程增长，即要**让子进程及时exit掉**。
+比如下面的例子我们想要fork出10个进程，但实际上每个子进程都在fork，最后生成了1024个进程：
+```cpp
+int main()
+{
+	int i = 0;
+	for(;i<10;i++)
+		fork();
+	exit(0);
+}
+```
+而让子进程exit()就会引出其他的问题：**僵尸进程**和**孤儿进程**，比如下面的程序：
+```cpp
+#define LEFT 30000000
+#define RIGHT 30000200
+int main()
+{
+	int i = 0, j = 0;
+	pid_t pid;
+	int mark = 0;
+	for(i = LEFT; i<RIGHT; i++)
+	{
+		pid = fork(); //父进程创建出200个子进程
+		if(pid < 0)
+		{
+			perror("fork()");
+			exit(1);
+		}
+		if(pid == 0) //子进程执行计算
+		{
+			mark = 1;
+			for(j = 2; j<i/2;j++)
+				if(i % j == 0)
+				{
+					mark = 0;
+					break;
+				}
+			if(mark == 1)
+				printf("the primer is %d\n", i);
+			//sleep(1000); //case 1: 子进程睡醒发现父亲已经死了，变成了孤儿
+			exit(0); //为了避免指数fork让子进程及时终止
+		}
+	}
+	//sleep(1000); //case 2: 父进程做梦时孩子死完了，并且都变成了僵尸
+	exit(0);
+}
+```
+显然创建出的200个子进程**并发执行**，最后的输出结果不是按顺序的。
+* case 1: 孤儿进程
+接下来如果让每个子进程在exit之前sleep(1000)，显然运行状况应该是子进程在睡觉，父进程却死了。这时候通过`ps axf`查看进程关系：
+```cpp
+4371 pts/1    S      0:00  \_ ./primer1
+4372 pts/1    S      0:00  \_ ./primer1
+4373 pts/1    S      0:00  \_ ./primer1
+4374 pts/1    S      0:00  \_ ./primer1
+.
+.
+.
+```
+我们发现，所有的子进程都顶头写。也就是说他们的**父进程变成了init进程**，创建他们的父亲已经正常exit结束掉了，也就是说父进程死了之后他们变成了孤儿，**孤儿进程由init进程接管**。
+
+可以看到这些子进程的状态都是`S`，是可被打断的睡眠，还在睡眠中。各种状态的描述如下：
+```cpp
+D    uninterruptible sleep (usually IO)
+R    running or runnable (on run queue)
+S    interruptible sleep (waiting for an event to complete)
+T    stopped by job control signal
+t    stopped by debugger during the tracing
+W    paging (not valid since the 2.6.xx kernel)
+X    dead (should never be seen)
+Z    defunct ("zombie") process, terminated but not reaped by its parent
+```
+* case 2: 僵尸进程
+首先资源释放有个基本的原则：**谁创建谁释放，谁打开谁关闭**。也就是说子进程的资源应该由父进程来释放。
+这里让父进程exit前sleep，孩子在睡梦中都exit死掉了，但是由于父进程孩子sleep，无人给孩子们**收尸**，他们都变成了**僵尸进程**。
+可以通过`killall primer1`来杀死所有名为primer1的子进程。这次的结果为：
+```cpp
+2180 pts/1    Ss     0:00  |   \_ bash
+4623 pts/1    S+     0:00  |       \_ ./primer1
+4624 pts/1    Z+     0:00  |           \_ [primer1] <defunct>
+4625 pts/1    Z+     0:00  |           \_ [primer1] <defunct>
+4626 pts/1    Z+     0:00  |           \_ [primer1] <defunct>
+.
+.
+.
+```
+可以看到父进程状态为`S+`还在睡觉，但是他的子进程全部exit死掉了，并且无人收尸变成了僵尸进程`Z+`
 #### fork之后父子进程的区别
 上面提到了就是全员复制创建新进程，连执行位置都一样。但是还是有一些不一样的地方：
-* 返回值不一样：
+* 返回值不一样：如果成功在父进程中fork返回子进程的id号，子进程返回0.如果返回-1表示没有生成子进程并且设置errno。
 * 父子进程的pid和ppid不同
 * 未决信号和文件锁不继承：未决信号即还没来得及响应的信号
 * 资源利用量清零

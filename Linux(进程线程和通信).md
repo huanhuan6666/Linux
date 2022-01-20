@@ -580,6 +580,65 @@ shell输出提示信息，**循环**接受命令执行命令。在shell中输入
 fork出来的子进程凭什么和父进程输出到同一个终端里？这是因为子进程和父进程的文件描述符表一样，因此**共用一个**系统打开表中的结构体，前三个stdin, stdout, stderr当然也一样了。
 
 那么可以想到一个简单的**父子进程通信**的方式：毕竟共用一个系统打开表的结构体，因此可以一个读一个写。
+
+#### 一个简单shell实现
+```cpp
+#define DELIMS " \t\n"
+void prompt()
+{
+	printf("myshell-0.1$: ");
+}
+parse(const char *line)
+{
+	char *token = NULL;
+	glob_t globres;
+	while()
+	{
+		token = strsep(&line, DELIMS) //规定分隔符
+		if(token == NULL)
+			break;
+		if(token[0] == '\0')
+			continue;
+		glob(token, GLOB_NOCHECK|GLOB_APPEND, NULL, &globres);
+	}
+}
+int main()
+{
+	char *linebuf = NULL;
+	size_t linebuf_size = 0;
+	int pid = 0;
+	while(1)
+	{
+		prompt();
+		if(getline(&linebuf, &linebuf_size, stdin) < 0) //读取输入的命令到linebuf
+			break;
+		
+		parse(linebuf); //解析命令
+		
+		if(0) //是内部命令
+		{
+			...
+		}
+		else //是外部命令
+		{
+			pid = fork();
+			if(pid < 0)
+			{
+				perror("fork()");
+				exit(1);
+			}
+			else if(pid == 0) //子进程
+			{
+				execvp(cmd.globres.gl_pathv[0], cmd.globres.gl_pathv); //第一个参数是待执行的文件名，第二个是二级指针类似main函数的char **argv
+				perror("execvp");
+				exit(1);
+			}
+			else //父进程
+				wait(NULL); //等待子进程结束
+		}
+	}
+}
+```
 ### 用户权限及组权限
 ### 扩展：解释器文件
 ### `system()`函数

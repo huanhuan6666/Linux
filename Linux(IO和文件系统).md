@@ -727,6 +727,7 @@ struct passwd {
 	char   *pw_shell;      /* shell program */
 }; //用户信息结构体passwd
 ```
+/etc/passwd里的每一项格式为：用户名:口令:用户标识号:组标识号:注释性描述:主目录:登录Shell
 passwd结构体里的字段和`/etc/passwd`文件里记录的字段一一对应。一般来说`root`用户的`uid = 0`。下面是通过输入用户uid来查询用户名的例子，使用getpwuid标准函数：
 ```cpp
 int main(int argc, char **argv)

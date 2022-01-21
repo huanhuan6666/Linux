@@ -814,11 +814,169 @@ closelog()
 
 
 ## 并发
+* 同步和异步，同步是**阻塞**模式，异步是**非阻塞**模式。
+	* 同步就是指一个进程在执行某个请求的时候，若该请求需要一段时间才能返回信息，那么这个进程将会一直等待下去，知道收到返回信息才继续执行下去，这样便于管理，但是资源利用率非常低
 
-## 信号
+	* 异步是指进程不需要一直等下去，而是继续执行下面的操作，不管其他进程的状态。当有消息返回式系统会通知进程进行处理，这样可以提高执行的效率。
+
+### 信号实现并发
+#### 信号的概念
+信号是**软件**的中断，信号的响应依赖于中断。
+
+可以通过`kill -l`命令查看所有信号：
+```cpp
+ 1) SIGHUP	 2) SIGINT	 3) SIGQUIT	 4) SIGILL	 5) SIGTRAP
+ 6) SIGABRT	 7) SIGBUS	 8) SIGFPE	 9) SIGKILL	10) SIGUSR1
+11) SIGSEGV	12) SIGUSR2	13) SIGPIPE	14) SIGALRM	15) SIGTERM
+16) SIGSTKFLT	17) SIGCHLD	18) SIGCONT	19) SIGSTOP	20) SIGTSTP
+21) SIGTTIN	22) SIGTTOU	23) SIGURG	24) SIGXCPU	25) SIGXFSZ
+26) SIGVTALRM	27) SIGPROF	28) SIGWINCH	29) SIGIO	30) SIGPWR
+31) SIGSYS	34) SIGRTMIN	35) SIGRTMIN+1	36) SIGRTMIN+2	37) SIGRTMIN+3
+38) SIGRTMIN+4	39) SIGRTMIN+5	40) SIGRTMIN+6	41) SIGRTMIN+7	42) SIGRTMIN+8
+43) SIGRTMIN+9	44) SIGRTMIN+10	45) SIGRTMIN+11	46) SIGRTMIN+12	47) SIGRTMIN+13
+48) SIGRTMIN+14	49) SIGRTMIN+15	50) SIGRTMAX-14	51) SIGRTMAX-13	52) SIGRTMAX-12
+53) SIGRTMAX-11	54) SIGRTMAX-10	55) SIGRTMAX-9	56) SIGRTMAX-8	57) SIGRTMAX-7
+58) SIGRTMAX-6	59) SIGRTMAX-5	60) SIGRTMAX-4	61) SIGRTMAX-3	62) SIGRTMAX-2
+63) SIGRTMAX-1	64) SIGRTMAX	
+```
+可以看到前31种信号都是**标准信号**；从32到64，即`SIGRTMIN`到`SIGRTMAX`，RT表示real time实时，也就是**实时信号**，将在最后提到。
+
+![image](https://user-images.githubusercontent.com/55400137/150538012-94a58776-de22-403c-8c88-88830f36eaa8.png)
+
+上面是对一些信号的解释，很多信号的默认动作都是：终止+core
+
+终止就是结束进程，core表示在当前工作目录中复制一份**程序终止时的内存映像**，即**出错现场**。
+
+一般出现`core dump 段错误`看不到这个core文件。是因为进程资源`ulimit -a`中设置的`core file size = 0`。需要通过`ulimit -c 10240`来修改，这样段错误后就能生成core文件，可以在这个出错现场上gdb调试。
+
+#### signal()函数
+signa()l**注册信号处理行为**，收到某个信号后通过**回调函数**进行对应的处理。函数原型如下：
+```cpp
+typedef void (*sighandler_t)(int);
+sighandler_t signal(int signum, sighandler_t handler); //第二个参数是个函数指针，返回值也是个函数指针，因此我们常常展开写：
+void (*signal(int, void (*func)(int)))(int); //这种写法的好处在于可以避免typedef可能的命名冲突，因为C语言名空间管理很糟糕
+```
+处理行为有三种情况：
+* SIG_IGN，即收到信号后忽略信号，什么都不做
+* SIG_DFL，收到信号后采用信号的默认行为，和不写注册函数一样
+* 自定义信号处理行为，也就是传入一个函数指针
+一个例子：
+```cpp
+int main()
+{
+	int i;
+	for(i = 0; i< 10;i++)
+	{
+		write(1, "*", 1);
+		sleep(1);
+	}
+}
+```
+如果在输出时`ctrl+C`，程序就会终止。
+* `ctrl+C`是`SIGINT`**打断信号**的快捷键，默认动作就是终止
+* `ctrl+\`是`SIGQUIT`**退出信号**的快捷键，默认动作是终止+生成core。
+
+由于SIGINT默认动作是终止，我们用signal函数注册新的处理行为：
+```cpp
+void func(int i)
+{
+	write(1, "1", 1);
+}
+int main()
+{
+	int i;
+	//signal(SIGINT, SIG_IGN); //忽略打断信号
+	signal(SIGINT, func);  //注册信号处理函数
+	for(i = 0; i< 10;i++)
+	{
+		write(1, "*", 1);
+		sleep(1);
+	}
+}
+```
+注册之后，按下`ctrl+C`会输出回显和感叹号`^C!`这样子，平平无奇。
+
+但是有个诡异的现象：如果一直按住`ctrl+C`不放，我们会发现程序会**很快**输出`*^C!*^C!*^C!*...`这样子，**远远小于10s!**
+
+牢记：**信号会打断阻塞的系统调用！**
+
+这就非常可怕了，因为我们之前讲的**所有IO操作都是阻塞的**(当然之后会涉及到非阻塞IO)，我们看看`open`和`read`的手册，错误会设置`errno`，errno可能为：
+```cpp
+ERRORS:
+//open
+EINTR  While  blocked  waiting  to  complete an open of a slow device (e.g., a FIFO; see fifo(7)), the call was
+       interrupted by a signal handler; see signal(7).
+//read
+EINTR  The call was interrupted by a signal before any data was read; see signal(7).
+```
+因此之前写的程序为了鲁棒性，即**防止**收到打断信号就立刻exit，需要额外处理一下：
+```cpp
+do
+{
+	fd = open("file", O_RDONLY);
+	if(fd < 0)
+	{
+		if(errno == EINTR) //如果是假错则继续
+			continue;
+		perror("open"); //否则为正错
+		exit(1);
+	}
+}while()
+
+while(1)
+{
+	len = read(fd, buf, SIZE);
+	if(len < 0)
+	{
+		if(errno == EINTR) //是假错则忽略
+			continue;
+		perror("read"); //否则为正错
+		exit(1);
+	}
+}
+
+while(len > 0)
+{
+	ret = write(fd, buf, len);
+	if(ret <  0)
+	{
+		if(errno == EINTR) //是假错则忽略
+			continue;
+		perror("write"); //否则为正错
+		exit(1);
+	}
+}
+```
+#### 信号的不可靠
+在**早期**的Unix中：
+* 标准信号会丢失，实时信号不会丢失。
+* 而且信号的行为不可靠，即处理完一次信号后之后的信号处理会变成默认行为。
+
+#### 可重入函数
+#### 信号响应全过程
+#### 信号常用函数
+```cpp
+kill();
+raise();
+alarm();
+pause();
+abort();
+system();
+sleep();
+```
+#### 信号集
+#### 信号屏蔽字和pending集的处理
+#### 扩展
+```cpp
+sigsuspend();
+sigaction();
+setitimer();
+```
+#### 实时信号
+
 多进程并发(信号量)
 多线程并发
-## 线程
+### 多线程实现并发
 ## 数据中继
 ## 高级IO
 ## IPC(进程间通信)

@@ -737,6 +737,46 @@ int setpgrp(void);                   /* System V version */
 
 #### 实现一个守护进程
 一个重要的原则就是守护进程脱离终端，因此不能再用标准输入输出了。
+```cpp
+int make_protect()
+{
+	pid_t pid;
+	pid = fork();
+	if(pid < 0)
+		return -1;
+	if(pid > 0) // parent
+		exit(0);
+	//child call setsid and cut down terminal
+	int fd = open("/dev/null", O_RDWR);
+	dup2(fd, 0);
+	dup2(fd, 1);
+	dup2(fd, 2);
+	setsid();
+	chdir("/");
+	return 0;
+}
+int main()
+{
+	int  i;
+	FILE *fp;
+	fp = fopen("/tmp/out", "w");
+	if(fp == NULL)
+		exit(1);
+	if(make_protect() < 0)
+		exit(1);
+	for(i = 0;;i++)
+	{
+		fprintf(fp, "%d", i);
+		fflush(fp);
+		sleep(1);
+	}
+	exit(0);
+}
+```
+向文件`/tmp/out`中一秒写一个数字，进程最后`ps axj`查看变成了**后台守护进程**，用`tail -f /tmp/out`可以看到文件一直在变化
+
+![image](https://user-images.githubusercontent.com/55400137/150498690-3fff39af-0ced-4c44-b830-cf34cbab42d5.png)
+
 
 
 ### 系统日志的书写

@@ -109,6 +109,7 @@ MAIL	邮件保存路径
 
 通过`ps`命令查看当前进程快照，`ps asf`命令查看所有进程的详细信息以及关系。**ps即`process snapshot`进程快照**
 然后可以用`pmap [pid]`命令查看进程号为pid的进程的**内存图**，**pmap即`process memory map`进程内存图**
+`top`命令：显示进程的**实时**状况，好像Windows的资源管理器。`ps`命令展示的是进程**快照**，是某一刻的状态。
 比如通过下面的代码来验证setenv函数是不是真的会在堆区开辟内存：
 ```cpp
 #include<stdio.h>
@@ -641,12 +642,43 @@ cat /etc/shadow
 ```
 
 ### `system()`函数
-`top`命令：显示进程的**实时**状况，好像Windows的资源管理器。`ps`命令展示的是进程**快照**，是某一刻的状态。
+system()标准函数用来**执行一个shell命令**，他的过程也是典中典：fork + execl + wait的封装
+```cpp
+int system(const char *command); //执行一个shell命令
 
-### 进程会计
-### 进程时间
+DESCRIPTION
+The  system()  library  function uses fork(2) to create a child process
+that executes the shell command specified in command using execl(3)  as
+follows:
+
+   execl("/bin/sh", "sh", "-c", command, (char *) 0);
+
+system() returns after the command has been completed.
+```
+从exec就能看出，这玩意纯纯的内部调用`/bin/sh`来执行command，和命令行直接输入`sh -c 命令`一样。参数用NULL结束，就是那个`(char *)0`
+
+这和我们写的myshell不一样，这个是用shell来实现shell，我们那个是完整的模拟。而且这玩意和myshell内部也就是在`execl`的参数有点不同，其余完全一致hhh
+
+### 进程会计和进程时间
+`acct()`函数，是个方言函数，不支持POSIX标准(Unix标准)，方言BSD或者systemV啥的。
+
+之前测试进程时间都是用`time`命令，这里还有个`times()`函数，它是time的中之人。
+```cpp
+clock_t times(struct tms *buf);
+struct tms {
+	clock_t tms_utime;  /* user time */
+	clock_t tms_stime;  /* system time */
+	clock_t tms_cutime; /* user time of children */
+	clock_t tms_cstime; /* system time of children */
+};
+```
+可以看到tms结构体里面存放自己的用户态时间和内核态时间，以及**子进程们**的时间。
+
+time命令显示的用户时间和内核时间就是**自己的加上子进程们的时间**。**real时间**再加上一些调度的时间等等。
 ### 守护进程
+
 ### 系统日志的书写
+
 ## 并发
 ## 信号
 多进程并发(信号量)

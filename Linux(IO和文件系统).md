@@ -505,6 +505,16 @@ S_ISREG(m)  is it a regular file?
 S_ISDIR(m)  directory?
 ```
 
+除了简单的`-rwxrwxrwx`权限，还有s/t特殊权限，比如：
+```cpp
+rwsrwxrwx 用户权限出现s
+//u+s 执行命令chmod u+s， 就是针对某个程序任何用户都有读写这个程序的权限，可以像root用户一样操作
+rwxrwsrwx 群组权限出现s
+//g+s 执行命令chmod g+s，它的意思是强制将此群组里的目录下文件编入到此群组中，无论是哪个用户创建的文件
+rwxrwxrwt 其他权限出现t
+//用时再看吧。。
+```
+
 文件权限的更改
 
 * `chmod`命令：`chmod u+x`表示给用户加上执行权限，类似的`g+r, o-w`表示给同组用户加上读，**删除**其他用户的写，`a+x`表示给所有用户加上执行权限，直接`chmod 666`表示权限设置成`rw-rw-rw-`。

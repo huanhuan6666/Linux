@@ -48,6 +48,7 @@ int atexit(void (*function)(void)); // 这个function就是个钩子，一个个
 ### 进程的异常终止(3种)：
 #### 调用库函数`abort()`
 #### 接到一个信号并终止
+比如kill命令，发信号杀死进程
 #### 最后一个线程对其取消请求作出响应
 	
 ### 命令行参数分析
@@ -726,6 +727,10 @@ UID = 进程用户ID，0表示root用户
 1   599   599   599 ?           -1 Ss       0   0:00 /lib/systemd/systemd-logind
 ```
 
+单实例守护进程：锁文件`/var/run/filename.pid`
+
+系统守护进程的启动脚本文件：`/etc/rc*.d`
+
 #### 一些函数
 除了上面的`setsid()`函数，还有几个和进程组有关的函数：
 ```cpp
@@ -759,29 +764,57 @@ int main()
 {
 	int  i;
 	FILE *fp;
+	openlog("nytest", LOG_PID, LOG_DAEMON);
+	
 	fp = fopen("/tmp/out", "w");
 	if(fp == NULL)
+	{
+		syslog(LOG_ERR, "fopen:%s", strerror(errno));
 		exit(1);
+	}
 	if(make_protect() < 0)
+	{
+		syslog(LOG_ERR, "daemon fail!"); //提交日志
 		exit(1);
+	}
+	else
+	{
+		syslog(LOG_INFO, "darmon success!");
+	}
 	for(i = 0;;i++)
 	{
 		fprintf(fp, "%d", i);
 		fflush(fp);
+		syslog(LOG_DEBUG, "%d is printed", i);
 		sleep(1);
 	}
+	closelog();
 	exit(0);
 }
 ```
-向文件`/tmp/out`中一秒写一个数字，进程最后`ps axj`查看变成了**后台守护进程**，用`tail -f /tmp/out`可以看到文件一直在变化
+向文件`/tmp/out`中一秒写一个数字，进程最后`ps axj`查看变成了**后台**进程，用`tail -f /tmp/out`可以看到文件一直在变化
 
 ![image](https://user-images.githubusercontent.com/55400137/150498690-3fff39af-0ced-4c44-b830-cf34cbab42d5.png)
 
-
-
+可是这个父进程也不是init进程1啊？查看那个进程发现父进程也是个守护进程，因此ubuntu的实际操作可能是先创建了一个守护进程，这个守护进程再fork依次。
+```cpp
+1  1590  1590  1590 ?           -1 Ss    1000   0:00 /lib/systemd/systemd --user
+```
+更多的实现用户守护进程细节见文章:[守护进程](https://xie.infoq.cn/article/c3a40c88f95d3a1cb56045dc4)
 ### 系统日志的书写
+syslogd服务和一些函数：
+```cpp
+openlog()
+syslog()
+closelog()
+```
+实现在守护进程的那个例子中，其实也是为了彻底和终端切断，所以状态信息都输出到日志里。
+
+日志文件在`/var/log/`文件夹下，上面的程序写到了`/var/log/message`文件里，可以用root身份查看。
+
 
 ## 并发
+
 ## 信号
 多进程并发(信号量)
 多线程并发

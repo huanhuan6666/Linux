@@ -110,9 +110,23 @@ execvp(res.gl_pathv[0], res.gl_pathv); //文件名及参数列表
 比如创建一个test用户：
 ![image](https://user-images.githubusercontent.com/55400137/150355183-99438ae3-753e-4b67-aebe-bd24bd733e4a.png)
 
-然后`sudo -i`暂时以root用户身份修改这个用户的登录shell：
+然后`sudo -i`暂时以root用户身份将文件cp到`/uer/bin/local/myshell`文件。
 
-![image](https://user-images.githubusercontent.com/55400137/150355903-8ca87d96-f6c4-43b6-ad31-86c574e22620.png)
+修改这个用户的登录shell：
+![image](https://user-images.githubusercontent.com/55400137/150463448-fe0788b2-66f5-4f62-97c2-1bef21246f89.png)
 
-这样那个人登录的时候就变成我们写的myshell了hhh。
 
+接下来`ctrl+alt+F3`切换到终端模式，然后登录test用户，就会发现登录shell变成我们写的myshell了：
+
+![image](https://user-images.githubusercontent.com/55400137/150463701-30cd235e-d901-4231-a543-fa5763e55281.png)
+
+由于test用户还什么都没有，ls什么都不显示，但是`whoami`可以看到确实是test用户，并且是我们写的myshell。尴尬的是由于exit是**内部命令**我们没法解析，只能`ctrl C`退出。
+
+* 关于登录shell的
+这个登录shell就是个二进制映像而已，完全可以换成别的。和脚本文件的第一行`#!/bin/bash`类似都可以随便改。
+比如我们把test用户的登录shell改成`top`程序，即任务管理器：
+![image](https://user-images.githubusercontent.com/55400137/150463983-18c86197-0417-4029-9c48-3454e7c7b7fe.png)
+
+之后切换到终端模式登录test用户，就会变成下面这个样子：
+
+![image](https://user-images.githubusercontent.com/55400137/150464307-cd55c33b-dc6c-463a-bfac-efbf83171936.png)

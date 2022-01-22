@@ -898,7 +898,7 @@ int main()
 
 但是有个诡异的现象：如果一直按住`ctrl+C`不放，我们会发现程序会**很快**输出`*^C!*^C!*^C!*...`这样子，**远远小于10s!**
 
-牢记：**信号会打断阻塞的系统调用！**
+牢记：**信号会打断阻塞的系统调用！**，也就是说read，open函数在内核态正执行（或者阻塞住了），来了一个信号，那么会直接从内核态切换到用户态去执行信号处理函数，原来的系统调用就**失败了**，会设置errno=EINTR。
 
 这就非常可怕了，因为我们之前讲的**所有IO操作都是阻塞的**(当然之后会涉及到非阻塞IO)，我们看看`open`和`read`的手册，错误会设置`errno`，errno可能为：
 ```cpp
@@ -1011,19 +1011,107 @@ int kill(pid_t pid, int sig); //给进程pid发一个信号sig。pid可以有特
 int raise(int sig); //给当前进程或者线程自己发信号
 //如果是给进程发送信号，等价于`kill(getpid(), sig)`；如果是多线程情况等价于`pthread_kill(pthread_self(), sig);`
 unsigned int alarm(unsigned int seconds);
-pause();
+//倒计时seconds秒给当前进程发SIGALRM信号，这个信号的默认操作是终止程序
+int pause(void);
+//让进程/线程睡眠sleep直到收到一个信号
 abort();
+//给本进程发送SIGABRT信号，让进程异常终止并产生core文件
 system();
+//之前已经讲过system函数相当于调用/bin/sh执行命令，但是在有信号参与的程序中，需要屏蔽掉信号SIGCHLD（），忽略信号SIGINT和SIGQUIT（用signal函数注册即可）
 sleep();
+//在有些平台下sleep是用alarm和pause封装的，而alarm多于一个的话会被覆盖。可以用nanosleep函数或者usleep替代。
 ```
+
+比如`alarm`函数的例子：
+```cpp
+int main()
+{
+	alarm(1);
+	alarm(10);
+	alarm(5); //如果有多个alarm最后一个alarm之前的都被取消
+	while(1); //让程序忙等
+	pause(); //让程序sleep等信号
+	exit(0);
+}
+```
+程序运行后5秒，显示`闹钟`字样后进程终止。但是这个程序非常傻，因为这是`while`**忙等**，资源全消耗到while等待上了。这就体现出了`pause()`函数的功能，让程序sleep而不是一直死循环。
+
+sleep在一些系统下面是用alarm和pause实现的，因此最好不要滥用sleep，很可能对其他alarm形成干扰。
+
+alarm的优势在于比time函数的精度更好，比如让一个程序跑5s，使用time函数
+```cpp
+int main()
+{
+	time_t end = time(NULL) + 5;
+	while(time(NULL)  <= end)
+		count++;
+	printf("%d", count);
+}
+```
+用alarm闹钟函数：
+```cpp
+int main()
+{
+	alarm(5); //5s后终止程序
+	while(1)
+		count++;
+	printf("%d", count);	
+}
+```
+但是这样打印不出来东西，因为收到SIGALRM信号程序就**异常终止**了，因此注册个函数：
+```cpp
+int loop = 1;
+void alarm_func(int s)
+{
+	loop = 0;
+}
+int main()
+{
+	signal(SIGALRM, alarm_func); //注册函数
+	alarm(5); //5s后终止程序
+	while(1)
+		count++;
+	printf("%d", count);	
+}
+```
+这样用time测出的时间和5s非常接近。
+
 #### 信号集
+信号集操作相关函数：
+```cpp
+int sigemptyset(sigset_t *set);
+int sigfillset(sigset_t *set);
+int sigaddset(sigset_t *set, int signum);
+int sigdelset(sigset_t *set, int signum);
+int sigismember(const sigset_t *set, int signum);
+sigset_t类型：信号集类型
+```
+
 #### 信号屏蔽字和pending集的处理
+* 进程可以手动调整信号屏蔽字，来决定对那些信号忽略或者处理。
+
+相关函数：
+```cpp
+int sigprocmask(int how, const sigset_t *set, sigset_t *oldset);
+```
+使用例：
+```cpp
+sigset_t set;
+sigemptyset(&set);
+sigaddset(&set, SIGINT);  //信号集里放入SIGINT信号
+sigprocmask(SIG_BLOCK, &set, NULL); //屏蔽信号集中的所有信号，也就是把屏蔽字对应位置成0
+sigprocmask(SIG_UNBLOCK, &set, NULL); //解除屏蔽
+```
+* sigpending函数
+乍一看以为是获取所有的未决信号，但是这是个系统调用，也就是说从内核态返回时**先处理**收到的并且未屏蔽的信号，也就是说最后返回的是**收到的被屏蔽的信号集**，因此是信号屏蔽字的字迹。
+
 #### 扩展
 ```cpp
 sigsuspend();
 sigaction();
-setitimer();
 ```
+
+
 #### 实时信号
 
 多进程并发(信号量)

@@ -1005,9 +1005,12 @@ while(len > 0)
 
 #### 信号常用函数
 ```cpp
-kill();
-raise();
-alarm();
+int kill(pid_t pid, int sig); //给进程pid发一个信号sig。pid可以有特殊值比如:
+//>0进程号；0和当前进程同进程组的所有进程(组内广播)；-1给所有有权限发送信号的进程发送(除了init进程，全局广播)；<-1发送给进程组号为-pid的所有进程
+//errno有不同的值，比如EPERM没有权限发送信号；ESRCH即pid进程或者进程组不存在
+int raise(int sig); //给当前进程或者线程自己发信号
+//如果是给进程发送信号，等价于`kill(getpid(), sig)`；如果是多线程情况等价于`pthread_kill(pthread_self(), sig);`
+unsigned int alarm(unsigned int seconds);
 pause();
 abort();
 system();

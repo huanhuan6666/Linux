@@ -959,7 +959,7 @@ while(len > 0)
 
 比如如果函数里用到了**全局变量**，那么这个函数在不同的地方调用会对全局资源产生竞争，从而导致**丢失修改**等等未知行为。
 
-**所有**的系统调用都是可重入的，部分标准库函数也是可重入的，比如：`memcpy`，而像`rand`就是不可重入的，有`rand_r()`可重入版本。只要一个函数有`_r`版本，那么原版函数就是**不可重入**的。
+**所有**的系统调用都是可重入的，部分标准库函数也是可重入的，比如：`memcpy`，而像`rand`就是不可重入的，有`rand_r()`可重入版本。只要一个函数有`_r`版本，那么原版函数就是**不可重入**的，而标准IO由于**共用缓冲区**，因此也不是可重入的，不能用于信号处理函数。
 
 #### 信号响应全过程
 内核为每个进程维护了两个**位向量**，一个阻塞信号集即blocking(也叫信号屏蔽字signal mask），一个未决信号集pending，存放在**进程控制块**(PCB)中的结构体中：
@@ -1113,10 +1113,147 @@ sigaction();
 
 
 #### 实时信号
+如果收到来标准信号和实时信号，先响应标准信号。注意标准信号和实时信号的函数用的是**同一套函数**，只不过信号参数不同，并且标准信号**会丢失**，实时信号可以排队，**不会丢失**。
 
-多进程并发(信号量)
-多线程并发
+实时信号排队的数量是有上限的，可以用`ulimit -a`查看：
+`pending signals      (-i)    15582`
+
+可以用`kill -信号num 进程号`命令向某进程发送信号，比如`kill -40 1700`即向1700进程发送`SIGRTMIN+6`信号。
+
 ### 多线程实现并发
+#### 线程的概念
+一个线程就是一个**正在运行的函数**，各个线程之间是兄弟关系，平起平坐，没有主次之分，也没有调用和被调用关系。多个线程是**共享同一进程的同一块块地址空间**，因此线程间通信要比进程间通信方便点。
+
+线程并发是先提出标准后完成实现，因此比信号并发更加规范，我们至今遇到的所有函数几乎**都支持线程并发**。线程的标准有很多，比如POSIX线程标准，其中的**线程标识**是`pthread_t`，其中p代表POSIX，thread代表线程。
+
+可以用函数`pthread_equal(pthread_t, pthread_t)`来比较两个线程是否相等；用`pthread_t pthread_self()`返回自己的线程标识。
+
+信号的局限性在信号处理函数中**必须可重入**，也就是说连标准IO都不能用，只能用一些算数操作或者系统调用。而线程处理没有这些限制，条件比信号弱，因此使用起来更方便。
+
+
+可以通过`ps axm`查看线程：
+```cpp
+  PID TTY      STAT   TIME COMMAND
+    1 ?        -      0:01 /sbin/init splash
+    - -        Ss     0:01 -
+    2 ?        -      0:00 [kthreadd]
+    - -        S      0:00 -
+  593 ?        -      0:00 /usr/lib/udisks2/udisksd
+    - -        Ssl    0:00 -
+    - -        Ssl    0:00 -
+    - -        Ssl    0:00 -
+    - -        Ssl    0:00 -
+    - -        Ssl    0:00 -
+  600 ?        -      0:00 avahi-daemon: running [njucs-VirtualBox.local]
+    - -        Ss     0:00 -
+```
+可以看到每个进程下面至少有一个`--`，即**每个进程至少有一个线程**，也就是说**进程也是一个容器**，如今**编程的单位**已经细化到了线程，处理器**调度的单位**实际上也是线程。
+
+也可以用**Linux的方式**查看`ps ax -L`：
+```cpp
+  PID   LWP TTY      STAT   TIME COMMAND
+ 1090  1090 ?        Ssl    0:00 /usr/bin/whoopsie -f
+ 1090  1110 ?        Ssl    0:00 /usr/bin/whoopsie -f
+ 1090  1111 ?        Ssl    0:00 /usr/bin/whoopsie -f
+ 1093  1093 ?        Ssl    0:00 /usr/bin/python3 /usr/share/unattended-upgrades
+ 1093  1129 ?        Ssl    0:00 /usr/bin/python3 /usr/share/unattended-upgrades
+ 1324  1324 ?        Sl     0:00 gdm-session-worker [pam/gdm-launch-environment]
+ 1324  1325 ?        Sl     0:00 gdm-session-worker [pam/gdm-launch-environment]
+ 1324  1326 ?        Sl     0:00 gdm-session-worker [pam/gdm-launch-environment]
+```
+可以看到一个进程，对应了好几个**LWP**，即**轻量级线程**，可以把它理解成Linux下的线程。同样可以看到：**进程是个承载线程的容器**。
+
+#### 线程的创建
+创建函数：
+```cpp
+int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
+                          void *(*start_routine) (void *), void *arg);
+//Compile and link with -pthread.
+```
+thread是个输入指针，间接赋值；attr是指定线程属性，NULL表示默认，将在之后用到；
+
+start_routine就是个函数指针，也就是线程本身(一个**并列运行的函数**)；arg就是函数的参数；由于参数和返回值都是`void *`, 因此如果想传入或返回多个值，就用**结构体**。
+
+成功返回0，不成功返回errno，注意是**返回**而**不是设置**，因此也**不能用**perror("func()")来报错。
+
+编写makefile时加上`CFLAGS += pthread`和`LDFLAGS += pthread`
+创建例子如下：
+```cpp
+void *myfunc(void *p)
+{
+	puts("thread is working!");
+	return NULL;
+}
+
+int main()
+{
+	pthread_t thread_id;
+	int err;
+	puts("Begin!");
+	err = pthread_create(&thread_id, NULL, myfunc, NULL);
+	puts("End!");
+	if(err)
+		fprintf(stderr, "pthread err %s", strerror(err));
+	exit(0);
+}
+```
+最后却只输出了`Begin! End!`，没有输出`thread is working`，这是因为**线程的调度取决于调度器的调度策略**，**main线程**中创建了个线程，但是这个线程还没有被调度，main线程中就exit(0)**将进程结束**掉了(进程的正常终止)。
+
+* 线程的终止
+线程终止有三种方式：
+1).线程从启动例程返回，返回值就是线程的退出码；若最后一个线程从其启动例程返回则进程**正常终止**
+2).线程可以被同一进程中的其他线程取消；最后一个线程对其取消请求作出响应则进程**异常终止**
+3).线程调用`pthread_exit()`函数，相当于进程的`exit()`；若最后一个线程调用`pthread_exit()`函数则进程**正常终止**
+
+函数`pthread_join()`相当于**进程中的wait()**，完成线程**收尸**。
+```cpp
+void pthread_exit(void *retval); //结束线程并且通过retval返回值
+int pthread_join(pthread_t thread, void **retval); //等待线程thread终止并获取其返回值到retval，retval也是个间接赋值
+```
+这两个函数是**配套使用**的，线程A函数中通过`pthread_exit()`返回值，在**同一进程**中使用`pthread_join`等待A的那个线程就可以通过`retval`获取其返回值。
+那么:
+```cpp
+void *myfunc(void *p)
+{
+	puts("thread is working!");
+	void *ret;
+	pthread_exit(ret);
+}
+
+int main()
+{
+	pthread_t thread_id;
+	int err;
+	void *ret = NULL; //返回值
+	puts("Begin!");
+	err = pthread_create(&thread_id, NULL, myfunc, NULL);
+	pthread_join(thread_id, &ret); //ret主调函数分配内存
+	puts("End!");
+	if(err)
+		fprintf(stderr, "pthread err %s", strerror(err));
+	exit(0);
+}
+```
+main线程创建了thread_id线程，并且pthread_join**等待这个线程运行完给它收尸**，然后再执行后续代码。因此输出一定是：`Begin! thread is working! End!`
+* 栈的清理
+两个函数：
+```cpp
+void pthread_cleanup_push(void (*routine)(void *), void *arg); //和atexit差不多，挂上钩子函数
+void pthread_cleanup_pop(int execute);
+```
+类似于进程中的钩子函数`atexit()`，但是钩子函数只能自己`atexit`挂钩子，自己不能左右取下来执行的过程。
+
+而`pthread_cleanup_pop(int execute)`，取下来一个钩子函数可以设定`execute`，如果**为1则执行**该钩子，**为0不执行**。
+
+更重要的，这两个函数必须**成对出现**，因为这两个函数是**宏展开**，成队出现才有匹配的大括号，否则会出语法错误。
+* 线程的取消选项
+#### 线程同步
+#### 线程属性
+* 线程同步的属性
+#### 重入
+* 线程和信号的关系
+* 线程和fork的关系
+
 ## 数据中继
 ## 高级IO
 ## IPC(进程间通信)

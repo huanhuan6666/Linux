@@ -1350,6 +1350,63 @@ int main()
 ```
 别忘了makefile里面加上`CFLAGS += -pthread; LDFLAGS += -pthred`;
 
+#### 线程池的实现
+这里实现的是个任务池，上游的main线程不断把任务放到池中，下游的三个线程抢任务。同样实现求质数，三个线程抢任务。
+
+三个线程抢任务其实就是P操作，加锁再抢，因此需要一个互斥量。而main线程负责发任务，这四个线程对一个任务操作，也就是**全局变量**num
+
+其实就是信号量PV操作的pthread实现，伪码如下：
+
+三个线程中：
+```cpp
+while(1)
+{
+	pthread_mutex_lock(); //P信号量
+	while(num == 0) //发现还没任务
+	{
+		pthread_mutex_unlock(); //松一下锁
+		sched_yield(); //出让调度器给别的线程，并且不影响颠簸
+		pthread_mutex_lock();
+	}
+	if(num == -1) //没任务了，跳出循环结束
+	{
+		pthread_mutex_unlock(); //!!!!!!!!!!!!临界区中的跳转如果跳到临界区外必须先解锁再跳！！！！！！
+		break;
+	}
+	i = num; //取i
+	num = 0;
+	pthread_mutex_unlock();//V信号量
+	//对i执行计算操作
+}
+```
+main线程中：
+```cpp
+for(i = LEFT; i<RIGHT;i++)
+{
+	pthread_mutex_lock(); //要放任务时先P
+	while(num != 0) //发现任务还没被取走
+	{
+		pthread_mutex_unlock(); //松一下锁
+		sched_yield(); //出让调度器给别的线程，并且不影响颠簸
+		pthread_mutex_lock();
+	}
+	num = i; //放任务
+	pthread_mutex_unlock(); //放好任务再V
+}
+
+pthread_mutex_lock()
+while(num != 0)
+{
+	pthread_mutex_unlock(); //松一下锁
+	sched_yield(); //出让调度器给别的线程，并且不影响颠簸
+	pthread_mutex_lock();
+}
+num = -1; //最后一个任务被拿走后放-1
+pthread_mutex_unlock()
+```
+但是这个程序还是有很多**忙等**的地方，因为信号量的P操作是阻塞的，而且很有可能该P到信号量的线程P不到，不该P到的线程却经常P到，全看命。
+
+虽然完成了同步，但是效率很低很盲目，因为信号量这个**抢锁机制**本身就是盲目的，很有可能你抢到了锁，但是你**并不需要这个锁**，需要这个锁的人却没有抢到。我们只是用**固定数量**的锁这个信息对多个线程之间执行逻辑的一种**粗暴的管理方式**，虽然逻辑是正确的。这就是**查询法**的弊端了，如果改成**通知法**，那就会好很多，也就是之后的**条件变量**。
 #### 线程属性
 * 线程同步的属性
 #### 重入

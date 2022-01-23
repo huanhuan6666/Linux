@@ -1202,7 +1202,7 @@ int main()
 * 线程的终止
 线程终止有三种方式：
 1).线程从启动例程返回，返回值就是线程的退出码；若最后一个线程从其启动例程返回则进程**正常终止**
-2).线程可以被同一进程中的其他线程取消；最后一个线程对其取消请求作出响应则进程**异常终止**
+2).线程可以被**同一进程中的其他线程**取消；最后一个线程对其取消请求作出响应则进程**异常终止**
 3).线程调用`pthread_exit()`函数，相当于进程的`exit()`；若最后一个线程调用`pthread_exit()`函数则进程**正常终止**
 
 函数`pthread_join()`相当于**进程中的wait()**，完成线程**收尸**。
@@ -1246,7 +1246,49 @@ void pthread_cleanup_pop(int execute);
 而`pthread_cleanup_pop(int execute)`，取下来一个钩子函数可以设定`execute`，如果**为1则执行**该钩子，**为0不执行**。
 
 更重要的，这两个函数必须**成对出现**，因为这两个函数是**宏展开**，成队出现才有匹配的大括号，否则会出语法错误。
+
 * 线程的取消选项
+```cpp
+int pthread_cancel(pthread_t thread);
+```
+比如用两个线程寻找二叉树的两个子树里的一个确定结点，如果一个线程找到的话那么另一个线程就不必做了，直接取消那个线程。
+
+本函数就是对线程thread发出**取消请求**，该线程响应取消后，可被pthread_join函数收尸。
+
+取消的状态有两种：响应和不响应。
+```cpp
+int pthread_setcancelstate(int state, int *oldstate);
+PTHREAD_CANCEL_ENABLE //state值表示响应
+PTHREAD_CANCEL_DISABLE //不响应
+```
+设置是否响应取消，不响应的话会**忽略**收到的取消请求。
+
+设置响应方式
+```cpp
+int pthread_setcanceltype(int type, int *oldtype);
+void pthread_testcancel(void); //什么都不做，就是一个cancle点，用于推迟取消
+PTHREAD_CANCEL_DEFERRED //推迟取消，收到取消请求后直到到达cancle点才响应
+PTHREAD_CANCEL_ASYNCHRONOUS //异步取消，收到请求立刻响应取消
+```
+响应取消分为：异步取消和推迟取消(默认，推迟至cancle点再响应，cancle点都是可能引发阻塞的系统调用)
+```cpp
+fd1 = open();
+if(fd1 < 0)
+	exit(1);
+pthread_cleanup_push(); //释放fd1的操作
+fd2 = open();
+```
+推迟取消：如果在执行挂钩函数之前收到了**取消请求**，不会立刻响应，导致fd1没法释放，而是等到**cancle点**即打开fd2处**才响应**取消（open是可能阻塞的系统调用），这时候钩子函数已经成功挂上了，如果失败可以释放fd1.
+
+* 线程分离
+```cpp
+int pthread_detach(pthread_t thread);
+```
+让thread线程分离出去**自生自灭**，之前线程资源的回收是需要**另一个**线程`pthread_join`，而分离出去的话线程资源由**系统自动回收**。
+
+#### 线程竞争实例
+多个线程之间可能涉及资源竞争。这部分的例子可以看之前OS作业的内容。
+
 #### 线程同步
 #### 线程属性
 * 线程同步的属性

@@ -1122,7 +1122,7 @@ sigaction();
 
 ### 多线程实现并发
 #### 线程的概念
-一个线程就是一个**正在运行的函数**，各个线程之间是兄弟关系，平起平坐，没有主次之分，也没有调用和被调用关系。多个线程是**共享同一进程的同一块块地址空间**。每个线程有自己的**栈**和**程序计数器**以及**一组寄存器**；**共享**进程中的**代码段**和**堆**以及**常量和静态变量**等等，因此线程间通信要比进程间通信方便点。
+一个线程就是一个**正在运行的函数**，各个线程之间是兄弟关系，平起平坐，没有主次之分，也没有调用和被调用关系。多个线程是**共享同一进程的同一块块地址空间**。每个线程有自己的**栈**和**程序计数器**以及**一组寄存器**；**共享**进程中的**代码段**和**堆**以及**常量和静态变量**等等，因此线程间通信要比进程间通信方便点，找个**全局变量**就可以让同一个进程内的线程贡共享数据。而进程之间由于内存空间不同，需要其他的机制才能通信：比如管道，消息队列，共享内存等等，将在之后讲到。
 
 线程并发是先提出标准后完成实现，因此比信号并发更加规范，我们至今遇到的所有函数几乎**都支持线程并发**。线程的标准有很多，比如POSIX线程标准，其中的**线程标识**是`pthread_t`，其中p代表POSIX，thread代表线程。
 
@@ -1130,6 +1130,9 @@ sigaction();
 
 信号的局限性在信号处理函数中**必须可重入**，也就是说连标准IO都不能用，只能用一些算数操作或者系统调用。而线程处理没有这些限制，条件比信号弱，因此使用起来更方便。
 
+【参考文章】:[线程之间到底共享了哪些资源？](https://cloud.tencent.com/developer/article/1768025)
+
+更深入的：线程和进程其实本不分家，区别只在于资源的共享情况，对应的**clone函数**，相关文章：[Linux线程实现](https://developer.aliyun.com/article/20607)
 
 可以通过`ps axm`查看线程：
 ```cpp
@@ -1407,11 +1410,146 @@ pthread_mutex_unlock()
 但是这个程序还是有很多**忙等**的地方，因为信号量的P操作是阻塞的，而且很有可能该P到信号量的线程P不到，不该P到的线程却经常P到，全看命。
 
 虽然完成了同步，但是效率很低很盲目，因为信号量这个**抢锁机制**本身就是盲目的，很有可能你抢到了锁，但是你**并不需要这个锁**，需要这个锁的人却没有抢到。我们只是用**固定数量**的锁这个信息对多个线程之间执行逻辑的一种**粗暴的管理方式**，虽然逻辑是正确的。这就是**查询法**的弊端了，如果改成**通知法**，那就会好很多，也就是之后的**条件变量**。
+
+#### 条件变量
+
+条件变量是和互斥锁**一起使用**的，条件变量之所以要和互斥锁一起使用，主要是因为互斥锁的一个明显的特点就是它只有两种状态：锁定和非锁定，而条件变量可以通过允许**线程阻塞**和等待另一个线程**发送信号**来**弥补**互斥锁的不足。条件变量不是锁，但是也可以造成线程阻塞，并且用的是**通知法**，可以减少不必要的**竞争**。
+
+如果仅仅是mutex，那么，不管共享资源里有没数据，**生产者及所有消费者**都全**一窝蜂**的去抢锁，会造成资源的浪费。有了条件变量机制以后，只有生产者**完成生产**，才会引起消费者之间的竞争，提高了程序效率。
+
+
+
+
+```cpp
+int pthread_cond_init(pthread_cond_t *restrict cond, const pthread_condattr_t *restrict attr); //初始化条件变量cond并设置属性attr
+pthread_cond_t cond = PTHREAD_COND_INITIALIZER; //静态初始化方法
+int pthread_cond_destroy(pthread_cond_t *cond); //销毁条件变量
+int pthread_cond_wait(pthread_cond_t *restrict cond, pthread_mutex_t *restrict mutex); //阻塞等待一个条件变量
+int pthread_cond_signal(pthread_cond_t *cond); // 唤醒至少一个阻塞在条件变量上的线程
+int pthread_cond_broadcast(pthread_cond_t *cond); // 唤醒全部阻塞在条件变量上的线程
+```
+pthread_cond_wait函数的作用如下：
+阻塞等待一个条件变量。具体而言有以下三个作用：
+
+* 阻塞等待条件变量cond（参1）满足；
+* 释放已掌握的互斥锁mutex（解锁互斥量）相当于pthread_mutex_unlock(&mutex);
+* 当被唤醒，pthread_cond_wait函数返回时，解除阻塞并**重新抢互斥锁**
+* 其中1、2.两步为一个**原子操作**。
+可以看到区别，之前全用mutex实现的话，抢到锁之后如果条件不满足，只是稍微松一下锁然后继续加锁：
+```cpp
+pthread_mutex_lock()
+while(num != 0)
+{
+	pthread_mutex_unlock(); //松一下锁
+	sched_yield(); //出让调度器给别的线程，并且不影响颠簸
+	pthread_mutex_lock();
+}
+```
+而使用信号量就阻塞wait在这里**等待通知**，不再盲目抢锁，被通知后才抢，即：
+```cpp
+pthread_mutex_lock(&mutex);
+while (head == NULL) {      //如果条件不满足，就没有抢锁的必要，一直阻塞等待
+    pthread_cond_wait(&has_product, &mutex);
+}
+```
+生产者消费者的例子：
+```cpp
+typedef struct msg {
+    struct msg *next;
+    int num;
+}msg_t;
+
+msg_t *head = NULL;
+msg_t *mp = NULL;
+
+/* 静态初始化 一个条件变量 和 一个互斥量*/
+pthread_cond_t has_product = PTHREAD_COND_INITIALIZER;
+pthread_mutex_t mutex =PTHREAD_MUTEX_INITIALIZER;
+
+void *th_producer(void *arg)
+{
+    while (1) {
+        mp = malloc(sizeof(msg_t));
+        mp->num = rand() % 1000;        //模拟生产一个产品
+        printf("--- produce: %d --------\n", mp->num);
+
+        pthread_mutex_lock(&mutex);
+        mp->next = head;
+        head = mp;
+        pthread_mutex_unlock(&mutex);
+
+        pthread_cond_signal(&has_product);      //唤醒线程去消费产品
+        sleep(rand() % 5);
+    }
+    return NULL;
+}
+
+void *th_consumer(void *arg)
+{
+    while (1) {
+        pthread_mutex_lock(&mutex);
+        while (head == NULL) {      //如果链表里没有产品，就没有抢锁的必要，一直阻塞等待
+            pthread_cond_wait(&has_product, &mutex);
+        }
+        mp = head;
+        head = mp->next;        //模拟消费掉一个产品
+        pthread_mutex_unlock(&mutex);
+
+        printf("========= consume: %d ======\n", mp->num);
+        free(mp);
+        mp = NULL;
+        sleep(rand() % 5);
+    }
+    return NULL;
+}
+
+int main()
+{
+    pthread_t pid, cid;
+    srand(time(NULL));
+
+    pthread_create(&pid, NULL, th_producer, NULL);
+    pthread_create(&cid, NULL, th_consumer, NULL);
+
+    pthread_join(pid, NULL);
+    pthread_join(cid, NULL);
+    return 0;
+}
+```
+#### 读写锁
+读锁：相当于共享锁；写锁：相当于互斥锁
 #### 线程属性
-* 线程同步的属性
+pthread_arrt_t类型，可以在创建线程时设置各种属性，比如线程栈大小等等
+
+```cpp
+Thread attributes:
+   Detach state        //分离状态，被pthread_join回收或者被系统回收
+   Scope               //作用域
+   Inherit scheduler   
+   Scheduling policy   //调度策略
+   Scheduling priority //调度优先级
+   Guard size          //线程栈保护区大小
+   Stack address       //线程栈地址
+   Stack size          //线程栈大小
+```
+创建时设置attr参数即可:
+```cpp
+pthread_attr_t attr;
+pthread_t tid;
+
+pthread_attr_init(&attr);
+pthread_attr_setstacksize(&attr, 1024*1024);
+err = pthread_create(&tid, &attr, func, NULL); //创建线程时传入attr
+pthread_attr_destroy(&attr);
+```
+* 线程同步的属性：
+1.互斥量属性：
+	
 #### 重入
 * 线程和信号的关系
 * 线程和fork的关系
+
+fork好比memcpy，创建了一个独立的进程，即使有写时拷贝技术，它们的C的虚拟空间本质上还是独立的，因此代价很高。而线程就是**当前进程空间内**扔出去的**一个函数**，因此创建更快更方便。而且线程栈独立但是共享进程的代码段和全局变量等等资源，通信起来更方便。
 
 ## 数据中继
 ## 高级IO

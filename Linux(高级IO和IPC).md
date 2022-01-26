@@ -38,6 +38,8 @@
 
 ![image](https://user-images.githubusercontent.com/55400137/150969766-9274ac38-9ac7-4e79-ab4e-d2eb7c359b0e.png)
 
+【参考文章】：
+[理解5种IO模型](https://cloud.tencent.com/developer/article/1684951)
 
 ### 有限状态机编程
 有限状态机编程思想就是用来解决复杂流程的问题，是C语言中**抗衡**面向对象设计模式的利器，因为过程式代码很多情况下难以维护，但是fsm很好地解决了这个问题。
@@ -98,58 +100,95 @@ while(fsm12.state != STATE_T ||fsm21.state != STATE_T)
 读状态即非阻塞read，读到buf里根据len判断是否成功，若成功则装换成写状态；失败则转换成报错状态
 ```cpp
 case STATE_R:
-			fsm->len = read(fsm->sfd, fsm->buf, BUFSIZE);
-			if(fsm->len == 0) //出错
-				fsm->state = STATE_T;
-			else if(fsm->len < 0)
-			{
-				if(errno == EAGAIN)
-					fsm->state = STATE_R; //假错继续读，也就是指向自身的箭头
-				else
-				{
-					fsm->state = STATE_Ex; //真错设置errstr
-					fsm->errstr = "read()";
-				}
-			}
-			else
-			{
-				fsm->state = STATE_W; //读成功转到写
-				fsm->pos = 0;
-			}
-			break;
+	fsm->len = read(fsm->sfd, fsm->buf, BUFSIZE);
+	if(fsm->len == 0) //出错
+		fsm->state = STATE_T;
+	else if(fsm->len < 0)
+	{
+		if(errno == EAGAIN)
+			fsm->state = STATE_R; //假错继续读，也就是指向自身的箭头
+		else
+		{
+			fsm->state = STATE_Ex; //真错设置errstr
+			fsm->errstr = "read()";
+		}
+	}
+	else
+	{
+		fsm->state = STATE_W; //读成功转到写
+		fsm->pos = 0;
+	}
+	break;
 ```
 写状态为了保证len长度全部写进去，需要一个pos属性，这个也是在编写过程中想到的
 ```cpp
 case STATE_W:
-			ret = write(fsm->dfd, fsm->buf + fsm->pos, fsm->len); //ret属性没有状态需要，因此不需要加入状态机
-			if(ret < 0)
-			{
-				if(errno == EAGAIN) //假错
-					fsm->state = STATE_W;
-				else
-				{
-					fsm->state = STATE_Ex; //出错
-					fsm->errstr = "write()";
-				}
-			}
-			else
-			{
-				fsm->pos += ret;
-				fsm->len -= ret;
-				if(fsm->len == 0)
-					fsm->state = STATE_R;
-				else
-					fsm->state = STATE_W; //指向自身的箭头本身就构成循环了
+	ret = write(fsm->dfd, fsm->buf + fsm->pos, fsm->len); //ret属性没有状态需要，因此不需要加入状态机
+	if(ret < 0)
+	{
+		if(errno == EAGAIN) //假错
+			fsm->state = STATE_W;
+		else
+		{
+			fsm->state = STATE_Ex; //出错
+			fsm->errstr = "write()";
+		}
+	}
+	else
+	{
+		fsm->pos += ret;
+		fsm->len -= ret;
+		if(fsm->len == 0)
+			fsm->state = STATE_R;
+		else
+			fsm->state = STATE_W; //指向自身的箭头本身就构成循环了
 
-			}
-			break;
+	}
+	break;
 ```
+剩下的出错态：
+```cpp
+case SATET_Ex:
+	perror(fsm->errstr);
+	fsm->state = STATE_T; //跳转到终止态
+```
+终止态啥的也没什么可写的动作，直接exit也行。
+
 其中main函数是测试框架，我们实现的状态机主要在`relay`函数和`fsm_driver`函数。实现mycopy函数，由于打开文件的方式选用**非阻塞**：因此需要避免没读到数据后返回`EAGAIN`这个**假错**，因为这个错误不是read函数的问题，只是我尝试读一次数据没有读到而已。
 
 
+## IO多路转接/复用
+通过**一个**线程完成对**多个**文件描述符的监控。
 
-## IO多路转接
+```cpp
+select();//非常古老，因此移植性比较好
+poll();  // 对select的改进
+epoll(); //效率高，但是Linux的方言(man手册在第七章)，不好移植
+```
+`fd_set`就是个文件描述符集合类型
+![image](https://user-images.githubusercontent.com/55400137/151126857-590759f7-c965-4e81-a224-343cba6ab70c.png)
 
+**多个**的进程/线程的IO可以**注册**到一个复用器（select）上，然后用**一个**进程调用该select， select会**监听所有**注册进来的IO；
+
+如果select**所有**监听的IO在内核缓冲区**数据都没有就绪**，select调用进程会被阻塞；而当**任一**IO在内核缓冲区中有可数据时，select调用就会返回；
+
+而后select调用进程可以自己或通知另外的进程（注册进程）来再次发起读取IO，读取内核中准备好的数据。
+
+可以看到，**多个**进程注册IO后，**只有**另一个select**调用进程**被阻塞，**所谓复用**就体现在了这里。
+
+* 区别：Linux中IO复用的实现方式主要有select、poll和epoll：
+	* select：注册IO、阻塞扫描，监听的IO最大连接数不能多于FD_SIZE；因为是**数组**实现
+	* poll：原理和Select相似，没有数量限制，但IO数量大扫描线性性能下降；**链表**实现
+	* epoll ：事件驱动不阻塞，mmap实现内核与用户空间的消息传递，数量很大，Linux2.6后内核支持；**红黑树**实现
+
+### select函数
+```cpp
+int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout)
+```
+【参考文章】:
+[IO多路复用讲解](https://juejin.cn/post/7051170770491441182)
+[理解IO多路复用的实现](https://juejin.cn/post/6882984260672847879)
+[select.poll.epoll的区别](https://juejin.cn/post/6850037276085321736)
 ## 其他读写函数
 
 ## 存储映射IO

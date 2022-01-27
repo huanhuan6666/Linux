@@ -379,8 +379,20 @@ close(epfd);
 [理解IO多路复用的实现](https://juejin.cn/post/6882984260672847879)
 [select.poll.epoll的区别](https://juejin.cn/post/6850037276085321736)
 ## 其他读写函数
+主要是两个函数，实现对多个buffer的读写
+```cpp
+ssize_t readv(int fd, const struct iovec *iov, int iovcnt); //iovec就是个小的buffer，iov和iovcnt又是个内存打包，也就是很多个小buffer
+ssize_t writev(int fd, const struct iovec *iov, int iovcnt);
+struct iovec {
+       void  *iov_base;    /* Starting address */
+       size_t iov_len;     /* Number of bytes to transfer */
+   };
 
+```
 ## 存储映射IO
-
+涉及函数为mmap，将文件/设备的内容映射到进程空间的某块地址处
+```cpp
+void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset); //映射到进程空间中addr开始长度为length的部分
+```
 ## 文件锁
 

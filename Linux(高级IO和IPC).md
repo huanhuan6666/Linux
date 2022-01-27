@@ -184,16 +184,17 @@ epoll(); //效率高，但是Linux的方言(man手册在第七章)，不好移�
 ### select函数
 ```cpp
 int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout);
-//nfds是监视描述符最大+1，后面三个fd_set，可读文件集、可写文件集、异常文件集，timeout是超时设置，如果监控的文件集没有任何期望的内容，将返回
+//nfds是监视描述符最大+1，后面三个fd_set，可读文件集、可写文件集、异常文件集，timeout是超时设置，NULL表示阻塞
 void FD_CLR(int fd, fd_set *set); //从set中删除fd描述符
 int  FD_ISSET(int fd, fd_set *set); //判断文件描述符是否在set中
 void FD_SET(int fd, fd_set *set); //添加fd到set中
 void FD_ZERO(fd_set *set); //清空set
 ```
 #### 缺陷
-select是**用事件组织文件描述符的**，可以监控的事件只有读、写、异常三种，可以监控的事件较少
+* select是**用事件为单位组织文件描述符的**，可以监控的事件只有读、写、异常三种（对应三个fd_set），可以监控的事件较少
+* 更重要的缺陷：select的**监控现场和监控结果共用同一块内存**，有文件就绪后将**删除所有**fd_set中未就绪的文件描述符，因此我们必须continue重新设置fd_set，开销很大
+* 优点就是移植性好，因为古老
 
-并且select的**监控现场和监控结果共用同一块内存**，有文件就绪后将**删除所有**fd_set中未就绪的文件描述符，
 #### 实例
 在之前写的两个终端复制的代码`relay.c`中：
 ```cpp
@@ -206,18 +207,173 @@ while(fsm12.state != STATE_T || fsm21.state != STATE_T)
 如果状态不是终止态的话就会**忙等**，CPU的占用率非常高，因此使用select监控：
 
 ```cpp
+fd_set rset, wset;
 while(fsm12.state != STATE_T || fsm21.state != STATE_T)
 {
 	//布置监控任务
-	rset, wset;
-	//监控
-	while(select(max(fd1, fd2)+1, &rset, &wset, NULL, NULL) < 0)
+	FD_ZERO(&rset);
+	FD_ZERO(&wset);
+	if(fsm12.state == STATE_R) //如果状态机fsm12为读状态
+		FD_SET(fsm12.sfd, &rset); //fsms12.sfd就是fd1
+	if(fsm12.state == STATE_W) //如果状态机fsm12为写状态
+		FD_SET(fsm12.sfd, &wset);
+	if(fsm21.state == STATE_R) //如果状态机fsm21为读状态
+		FD_SET(fsm21.sfd, &rset); 
+	if(fsm21.state == STATE_W) //如果状态机fsm21为写状态
+		FD_SET(fsm21.sfd, &wset);
+	
+	//用select监控
+	if(select(max(fd1, fd2)+1, &rset, &wset, NULL, NULL) < 0)
 	{
-		if(errno == EINTR)
+		if(errno == EINTR) //如果假错必须重新设置fd_set，因为select会清空监控结果
 			continue;
+		perror("select()");
+		exit(1);
 	}
+	//查看监控结果
+	if(FD_ISSET(fd1, &rset) || FD_ISSET(fd2, &wset)) //1可读2可写
+		fsm_driver(&fsm12);
+	if(FD_ISSET(fd2, &rset) || FD_ISSET(fd1, &wset)) //2可读1可写
+		fsm_driver(&fsm21);
 }
 ```
+这样程序会**阻塞到**select函数处，进程阻塞就是sleep了，因此CPU的占用率几乎无变化，而不像之前忙等那样几乎占满。
+* 还有个问题就是上面的代码只推动状态机处于读态或者写态，而STATE_Ex态到STATE_T态的推动是**无条件**的，因此我们做一条**线**：
+```cpp
+enum
+{
+	STATE_R = 1,
+	STATE_W,
+	STATE_AUTO, //这个状态其实就是个占位符
+	STATE_Ex,
+	STATE_T
+};
+```
+因此在select监控之前，需要首先判断是否可以**无条件推动**，即`fsm.state > STATE_AUTO`，因此添加代码：
+```cpp
+if(fsm12.state > STATE_AUTO)
+	fsm_driver(&fsm12);
+if(fsm21.state > STATE_AUTO)
+	fsm_driver(&fsm21);
+//之后才是select监视
+```
+
+### poll函数
+poll函数是对select函数的改进，最明显的改进就是将**感兴趣**的事件和**已经发生**的事件**分开存储**，而不是共用内存。
+
+poll是**以文件描述符为单位组织事件**，引入pollfd结构体来实现。并且poll可以监控的事件更多，不像select只能监控三种事件。
+
+```cpp
+int poll(struct pollfd *fds, nfds_t nfds, int timeout); //前两个参数是内存打包：数组首地址和元素个数；timeout超时设置为-1表示阻塞
+struct pollfd {
+       int   fd;         /* file descriptor */
+       short events;     /* requested events */ //感兴趣的事件，用位图表示，就是一堆宏或
+       short revents;    /* returned events */  //在这个文件描述符上发生的事件
+   };
+```
+返回值为revents非0的结构体的**个数**，即**已经就绪的**文件描述符的个数。失败的话返回-1并设置errno，会有假错
+
+#### 实例
+同样三步走：布置监控任务；监控；查看监控结果
+```cpp
+struct poll_fd pfd[2]; //自定义结构体数组
+pfd[0].fd = fd1;
+pfd[1].fd = fd2;
+while(fsm12.state != STATE_T || fsm21.state != STATE_T)
+{
+	//布置监控任务
+	pdf[0].events = 0;	
+	if(fsm12.state == STATE_R)  //当fsm12可读
+		pdf[0].events |= POLLIN;	
+	if(fsm21.state == STATE_W)  //当fsm21可写
+		pdf[0].events |= POLLOUT;
+	if(fsm21.state == STATE_R)  //当fsm21可读
+		pdf[1].events |= POLLIN;
+	if(fsm12.state == STATE_W)  //当fsm12可写
+		pdf[1].events |= POLLOUT;
+		
+	//用poll监控
+	while(poll(pfd, 2, -1) < 0)
+	{
+		if(errno == EINTR) //如果假错不用重新布置监控任务，因为poll将发生事件和监控现场分开存储
+			continue;
+		perror("select()");
+		exit(1);
+	}
+	//查看监控结果，即revents项
+	if(pdf[0].revents &POLLIN || pdf[1].revents &POLLOUT) //1可读2可写
+		fsm_driver(&fsm12);
+	if(pdf[1].revents &POLLIN || pdf[0].revents &POLLOUT) //2可读1可写
+		fsm_driver(&fsm21);
+}
+```
+可以看到这样程序执行后，将会阻塞到select函数处，CPU的占用率没有明显波动而不像之前那样几乎占满。
+
+### epoll函数
+epoll是Linux的一种机制，涉及到三个**系统调用**。定义了一套完整的接口让用户使用，内部的实现**全部在内核态**，而不像select和poll那样需要在用户态建立自己的结构体（比如pollfd），创建实例由epoll_create()系统调用实现。
+```cpp
+int epoll_create(int size); //创建epoll实例并返回文件描述符epfd
+int epoll_ctl(int epfd, int op, int fd, struct epoll_event *event); //在epfd示例中进行op操作
+EPOLL_CTL_ADD //op操作，添加fd
+EPOLL_CTL_MOD //修改对于fd的关心事件
+EPOLL_CTL_DEL //删除fd
+
+struct epoll_event {
+       uint32_t     events;    /* Epoll events */ //事件也是一个位图，和poll中的那样一堆宏
+       epoll_data_t data;      /* User data variable */ //这是一个共用体，里面包含fd项
+   };
+
+int epoll_wait(int epfd, struct epoll_event *events, int maxevents, int timeout); //等待epfd所关心的事件，并将发生的事件放到epoll_event类型的数组里（内存打包
+// timeout为-1表示阻塞
+```
+#### 实例
+```cpp
+int epfd = epoll_create(10); //返回文件描述符epfd
+struct epoll_event ev;
+ev.events = 0; //暂时不添加事件
+epoll_ctl(epfd, EPOLL_CTL_ADD, fd1, &ev); //添加fd1
+ev.events = 0;
+epoll_ctl(epfd, EPOLL_CTL_ADD, fd2, &ev); //添加fd2
+if(epfd < 0)
+{
+	perror("epoll_create()");
+	exit(1);
+}
+while(fsm12.state != STATE_T || fsm21.state != STATE_T)
+{
+	//布置监控任务
+	ev.data.fd = fd1;
+	ev.events = 0; //修改fd1的事件
+	if(fsm12.state == STATE_R)  //当fsm12可读
+		ev.events |= EPOLLIN; 
+	if(fsm21.state == STATE_W)  //当fsm21可写
+		ev.events |= EPOLLOUT; 
+	epoll_ctl(epfd, EPOLL_CTL_MOD, fd1, &ev);
+	
+	ev.events = 0; //修改fd2的事件
+	if(fsm21.state == STATE_R)  //当fsm21可读
+		ev.events |= EPOLLIN; 
+	if(fsm12.state == STATE_W)  //当fsm12可写
+		ev.events |= EPOLLOUT;
+	epoll_ctl(epfd, EPOLL_CTL_MOD, fd2, &ev);
+		
+	//用epoll_wait监控
+	while(epoll_wait(epfd, &ev, 1, -1) < 0) //数组大小为1
+	{
+		if(errno == EINTR) 
+			continue;
+		perror("epoll_wait()");
+		exit(1);
+	}
+	//查看监控结果
+	if(ev.date.fd==fd1 && ev.events&EPOLLIN || ev.date.fd==fd2 && ev.events&EPOLLOUT) //1可读2可写
+		fsm_driver(&fsm12);
+	if(ev.date.fd==fd2 && ev.events&EPOLLIN || ev.date.fd==fd1 && ev.events&EPOLLOUT) //2可读1可写
+		fsm_driver(&fsm21);
+}
+close(epfd);
+```
+
 【参考文章】:
 [IO多路复用讲解](https://juejin.cn/post/7051170770491441182)
 [理解IO多路复用的实现](https://juejin.cn/post/6882984260672847879)

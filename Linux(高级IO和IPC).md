@@ -190,8 +190,34 @@ int  FD_ISSET(int fd, fd_set *set); //判断文件描述符是否在set中
 void FD_SET(int fd, fd_set *set); //添加fd到set中
 void FD_ZERO(fd_set *set); //清空set
 ```
+#### 缺陷
+select是**用事件组织文件描述符的**，可以监控的事件只有读、写、异常三种，可以监控的事件较少
+
+并且select的**监控现场和监控结果共用同一块内存**，有文件就绪后将**删除所有**fd_set中未就绪的文件描述符，
 #### 实例
 在之前写的两个终端复制的代码`relay.c`中：
+```cpp
+while(fsm12.state != STATE_T || fsm21.state != STATE_T)
+{
+	fsm_driver(&fsm12);
+	fsm_driver(&fsm21);
+}
+```
+如果状态不是终止态的话就会**忙等**，CPU的占用率非常高，因此使用select监控：
+
+```cpp
+while(fsm12.state != STATE_T || fsm21.state != STATE_T)
+{
+	//布置监控任务
+	rset, wset;
+	//监控
+	while(select(max(fd1, fd2)+1, &rset, &wset, NULL, NULL) < 0)
+	{
+		if(errno == EINTR)
+			continue;
+	}
+}
+```
 【参考文章】:
 [IO多路复用讲解](https://juejin.cn/post/7051170770491441182)
 [理解IO多路复用的实现](https://juejin.cn/post/6882984260672847879)

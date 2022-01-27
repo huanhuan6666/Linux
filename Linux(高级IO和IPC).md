@@ -190,6 +190,7 @@ int  FD_ISSET(int fd, fd_set *set); //判断文件描述符是否在set中
 void FD_SET(int fd, fd_set *set); //添加fd到set中
 void FD_ZERO(fd_set *set); //清空set
 ```
+select可以实现一个安全的休眠，即`select(0, NULL, NULL, NULL, time);` time就是睡眠时间。
 #### 缺陷
 * select是**用事件为单位组织文件描述符的**，可以监控的事件只有读、写、异常三种（对应三个fd_set），可以监控的事件较少
 * 更重要的缺陷：select的**监控现场和监控结果共用同一块内存**，有文件就绪后将**删除所有**fd_set中未就绪的文件描述符，因此我们必须continue重新设置fd_set，开销很大
@@ -392,7 +393,17 @@ struct iovec {
 ## 存储映射IO
 涉及函数为mmap，将文件/设备的内容映射到进程空间的某块地址处
 ```cpp
-void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset); //映射到进程空间中addr开始长度为length的部分
+void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset); //映射到进程空间中addr开始长度为length的部分，成功返回起始位置
+int munmap(void* addr, size)t length); //解除映射
 ```
+那么这就有个问题，我们不知道哪块内存是安全的，因此可以填NULL让mmap自己找一块安全的内存。
+
+port表示映射好的内存的属性，读写等等
+
+flags标记，也是个位图，确定特殊要求，必选的有`MAP_SHARED`或`MAP_PRIVATE`；后面有可选项，比较重要的有**匿名映射**选项`MAP_ANONYMOUS`
+
+fd就是打开的文件
+
+offset表示从fd文件offset偏移量开始映射length个字节到addr起始处
 ## 文件锁
 

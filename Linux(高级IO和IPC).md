@@ -183,8 +183,15 @@ epoll(); //效率高，但是Linux的方言(man手册在第七章)，不好移�
 
 ### select函数
 ```cpp
-int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout)
+int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout);
+//nfds是监视描述符最大+1，后面三个fd_set，可读文件集、可写文件集、异常文件集，timeout是超时设置，如果监控的文件集没有任何期望的内容，将返回
+void FD_CLR(int fd, fd_set *set); //从set中删除fd描述符
+int  FD_ISSET(int fd, fd_set *set); //判断文件描述符是否在set中
+void FD_SET(int fd, fd_set *set); //添加fd到set中
+void FD_ZERO(fd_set *set); //清空set
 ```
+#### 实例
+在之前写的两个终端复制的代码`relay.c`中：
 【参考文章】:
 [IO多路复用讲解](https://juejin.cn/post/7051170770491441182)
 [理解IO多路复用的实现](https://juejin.cn/post/6882984260672847879)

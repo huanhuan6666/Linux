@@ -391,19 +391,119 @@ struct iovec {
 
 ```
 ## 存储映射IO
-涉及函数为mmap，将文件/设备的内容映射到进程空间的某块地址处
+涉及函数为mmap，将文件/设备的内容映射到进程空间的某块地址处。
+
+这样一来，原本在磁盘上的内容，想要去读写就需要open打开再去read或者write，但是一旦映射到了内存上，就可以**使用指针**去操作，这样对文件的操作就有了更多的方法，当然也就可以修改内存直接改变磁盘文件。
+【参考文章】：
+[mmap是什么 为什么 怎么用](https://www.jianshu.com/p/57fc5833387a)
+
+[浅谈Linux内存完整的管理机制](https://github.com/0voice/kernel_memory_management/blob/main/%E2%9C%8D%20%E6%96%87%E7%AB%A0/%E6%B5%85%E8%B0%88Linux%E5%86%85%E5%AD%98%E7%AE%A1%E7%90%86%E6%9C%BA%E5%88%B6.md)
+
+[深入浅出Linux内存管理](https://github.com/0voice/kernel_memory_management/blob/main/%E2%9C%8D%20%E6%96%87%E7%AB%A0/%E6%B7%B1%E5%85%A5%E6%B5%85%E5%87%BAlinux%E5%86%85%E5%AD%98%E7%AE%A1%E7%90%86%EF%BC%88%E4%B8%80%EF%BC%89.md)
 ```cpp
 void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset); //映射到进程空间中addr开始长度为length的部分，成功返回起始位置
 int munmap(void* addr, size)t length); //解除映射
 ```
 那么这就有个问题，我们不知道哪块内存是安全的，因此可以填NULL让mmap自己找一块安全的内存。
+![image](https://user-images.githubusercontent.com/55400137/151473846-eebd5ce0-8cdf-41ca-9469-9fbbb77fd4d8.png)
 
-port表示映射好的内存的属性，读写等等
+port表示权限，读写等等
 
 flags标记，也是个位图，确定特殊要求，必选的有`MAP_SHARED`或`MAP_PRIVATE`；后面有可选项，比较重要的有**匿名映射**选项`MAP_ANONYMOUS`
 
 fd就是打开的文件
 
 offset表示从fd文件offset偏移量开始映射length个字节到addr起始处
-## 文件锁
+### 实例
+将文件映射到进程的内存空间，并且数文件中字符a的个数：
+```cpp
+int main(int argc, char **argv)
+{
+	struct stat st;
+	char *str;
+	if(argc < 2)
+	{
+		fprintf(stderr, "Usage:too fewer args...\n");
+		exit(1);	
+	}
+	int fd = open(argv[1], O_RDONLY);
+	if(fd < 0)
+	{
+		perror("open()");
+		exit(1);
+	}
+	if(fstat(fd, &st)<0) //st是为了获取文件长度
+	{
+		perror("fstat()");
+		exit(1);
+	}
+	str = mmap(NULL, st.st_size, PROT_READ, MAP_SHARED, fd, 0); //将文件fd映射到进程的内存空间，返回映射好的首地址str
+	if(str == MAP_FAILED)
+	{
+		perror("mmap()");
+		exit(1);
+	}
+	close(fd);      //！映射完之后原文件就可以关闭了
+	int i, count;
+	for(i = 0; i<st.st_size;i++)
+	{
+		if(str[i] == 'a')
+			count++;
+	}
+	printf("a's count is %d\n", count);
+	munmap(str, st.st_size); //解除映射
+}
+```
 
+### 父子进程mmap实现通信
+mmap可以当作malloc那样使用**动态分配内存**，即不依赖于任何文件，fd参数为-1，只能选择**匿名映射**MAP_ANONYMOUS。即：
+```cpp
+mmap(NULL, MEMSIZE, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
+```
+匿名映射会将一个**内核创建**的全为进制零的**匿名文件文件**映射到虚拟内存中。由于子进程会duplicate父进程的内存空间，因此它们会映射到**同一个**匿名文件从而实现通信。
+
+代码如下：子进程写匿名文件，父进程读，实现通信。
+```cpp
+int main(int argc, char **argv)
+{
+	char *ptr;
+	ptr = mmap(NULL, MEMSIZE, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
+	
+	if(ptr == MAP_FAILED)
+	{
+		perror("mmap()");
+		exit(1);
+	}
+	pid_t pid;
+	pid = fork();
+	if(pid < 0) //failure
+	{
+		perror("fork()");
+		munmap(ptr, MEMSIZE);
+		exit(1);
+	}
+	if(pid == 0) // child
+	{
+		strcpy(ptr, "hello!");
+		munmap(ptr, MEMSIZE);
+		exit(0);
+	}
+	else //  parent
+	{
+		wait(NULL);
+		puts(ptr);
+		munmap(ptr, MEMSIZE);
+		exit(0);
+	}
+}
+```
+
+## 文件锁
+主要是为了解决多进程操作同一个文件的竞争问题，可以锁自己工作文件的一**部分**。
+涉及到几个函数
+```cpp
+fcntl();
+flock();
+
+```
+之前我们通过**多线程并发**，`pthread_create`和`pthread_mutex`互斥量来实现。这里是**多进程并发**

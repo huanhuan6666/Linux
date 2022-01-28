@@ -507,3 +507,11 @@ flock();
 
 ```
 之前我们通过**多线程并发**，`pthread_create`和`pthread_mutex`互斥量来实现。这里是**多进程并发**
+```cpp
+//下面就是文件锁锁住临界区
+fd = fileno(fp);
+lockf(fd, F_LOCK, 0);
+fgets(linebuf, BUFSIZE, fp);
+lokc(fd, F_ULOCK, 0);
+```
+

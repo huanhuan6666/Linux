@@ -526,16 +526,16 @@ lokc(fd, F_ULOCK, 0);
 
 实现见`mypipe.md`
 
-## 进程间通信(IPC)
-### 同一台主机上的进程
-#### 管道
+# 进程间通信(IPC)
+## 同一台主机上的进程
+### 管道
 IPC的管道机制是内核提供的功能，管道文件**均由内核创建**，**单工**通信，并且有**自同步机制**，区分命名管道和匿名管道：
 > **单工**通信模式：数据传输为**单向**，固定一端为读端一端为写端。
 * 管道文件和普通文件的区别在于：
 	* 管道有同步机制：缓冲区空时读者阻塞，缓冲区满写者阻塞
 	* 必须同时有读者和写者才能使用管道。
 	* 和我们之前实现的一样：内核提供的管道也是个**环形队列**
-* 匿名管道
+#### 匿名管道
 
 只能用于**父子进程**之间的通信。
 > 临时文件：
@@ -616,7 +616,7 @@ if(pid == 0) //child read
 ```
 > 对于`mpg321`的使用：`cat jay01.mp3 | mpg321 -`其中-表示从标准输入获取文件。
 
-* 管道命令
+#### 管道命令
 比如`ls | grep `连接两个命令：即将一个进程的输出作为另一个进程的输入，这里用到的就是**匿名管道**，当命令里面包含一个**管道符**`|`时，就会先pipe再fork，当然涉及到shell进程的细节：
 
 对于管道命令`cmd1 | cmd2`：
@@ -633,7 +633,7 @@ if(pid == 0) //child read
 ![image](https://user-images.githubusercontent.com/55400137/151652526-9204aafc-f3d8-4797-bafa-c12f28b62dbc.png)
 
 
-* 命名管道
+#### 命名管道
 
 和匿名管道的区别在于FIFO有文件名可以供**没有**亲缘关系的进程通信。
 
@@ -664,12 +664,84 @@ cat mypipe
 
 【参考文章】: [Linux中管道的实现](https://segmentfault.com/a/1190000009528245)  [shell中管道命令的实现](https://juejin.cn/post/6844903695717498887#comment)
 
-* 双工管道
+#### 双工管道
 由于传统管道信息流动方向是固定的，我们想要实现双向的信息流动：那么就创建两个管道，一个父读子写，一个父写子读就可以实现了。
 
-#### XSI -> SysV
+### XSI -> SysV
+通过`ipcs`可以看到XSI -> SysV提供的几种进程间通信机制：
+```cpp
+--------- Message Queues -----------
+key       msqid      拥有者  权限     已用字节数 消息      
 
-### 不同主机上的进程
-#### 网络套接字socket
+------------ Shared Memory --------------
+key       shmid      拥有者  权限     字节     连接数  状态      
+0x00000000 131072     njucs      777        16384      1          目标       
+0x00000000 327681     njucs      600        67108864   2          目标         
+
+--------- Semaphore Arrays -----------
+key        semid      拥有者  权限     nsems     
+
+```
+其中：
+
+Message Queues： 消息队列  msg
+Semaphore Arrays： 信号量数组  sem
+Shared Memory: 共享内存 shm
+key: 使用key来确定通信的双方拿到的是**同一种**通信机制。
+
+这部分涉及到的函数命名规则为：`xxxget(获取); xxxop(操作); xxxctl(控制)`
+> 用man手册查看时，就可以按照这种方式查询，比如获取一个消息队列 msgget, 获取信号量数组 semget， 获取一块共享内存 shmget
+
+注意区分:
+
+主动端：**先发包**的一方
+被动端：**先收包**的一方
+
+> 比如登录QQ我就是主动端，因为是我先发包请求QQ服务器；但是被动端先运行，即QQ服务器先运行等待我的请求包。
+
+
+#### 消息队列msg
+和管道不一样，消息队列是**双工**的，通信双方都能读写。
+相关函数：
+```cpp
+int msgget(key_t key, int msgflg); //创建和访问一个消息队列，返回一个消息队列标识符msgid
+int msgsnd(int msqid, const void *msgp, size_t msgsz, int msgflg); //把消息添加到消息队列，msgid是由msgget函数返回的消息队列标识符
+ssize_t msgrcv(int msqid, void *msgp, size_t msgsz, long msgtyp, int msgflg); //接收
+int msgctl(int msqid, int cmd, struct msqid_ds *buf); //控制消息队列，比如IPC_RMID就是删除
+```
+* 参数相关
+	* 和其他两个IPC机制一样，程序必须提供一个**键key**来命名某个**特定的**消息队列；msgflg是一个**权限标志**，表示消息队列的访问权限，它与**文件的访问权限**一样。
+	* msgflg可以与`IPC_CREAT`做或操作，表示当**key所命名**的消息队列**不存在时创建**一个消息队列，如果key所命名的消息队列存在时，IPC_CREAT标志会被**忽略**，而只返回一个标识符。
+	* msg_ptr是一个指向准备发送消息的指针，但是消息的数据结构却有一定的要求，指针msg_ptr所指向的消息结构一定要是以一个`long mtype`成员变量开始的结构体，接收函数将用这个成员来确定**消息的类型**。所以消息结构要定义成这样：
+```cpp
+struct my_message{
+    long int message_type;
+    /* The data you wish to transfer*/
+};
+```
+	* msg_sz是msg_ptr指向的**消息的长度**，注意是消息的长度，而**不是整个结构体的长度**，也就是说msg_sz是不包括`long mtype`的长度。
+	* msgtype可以实现一种简单的**接收优先级**。如果msgtype为0，就获取队列中的第一个消息。如果它的值大于零，将获取具有相同消息类型的第一个信息。如果它小于零，就获取类型等于或小于msgtype的绝对值的第一个消息。
+	
+
+* 实例
+我们使用IPC实际上就是**自己封装协议**，我们定义消息类型为：
+```cpp
+struct msg_st
+{
+        long mtype; //协议要遵循msgbuf约定
+        char name[30];
+        int math;
+        int chinese;
+};
+```
+让rcver接收者创建和销毁消息队列，snder获取创建好的消息队列。完整代码见：`msg.md`。
+
+【参考文章】：[Linux进程间通信——消息队列](https://blog.csdn.net/ljianhui/article/details/10287879)
+#### 信号量数组sem
+
+#### 共享内存shm
+
+## 不同主机上的进程
+### 网络套接字socket
 * 封装协议
 协议就是通信双方约定的格式

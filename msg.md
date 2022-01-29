@@ -62,7 +62,10 @@ int main()
 创建消息队列后，使用`ipcs`可以看到新创建的消息队列：
 ![image](https://user-images.githubusercontent.com/55400137/151663020-093ba151-bec0-4c83-b262-0fcd9324bf17.png)
 
-但是这样写完程序后由于while1循环，只能通过ctrl+C打断进程来退出，这样异常终止永远执行不了销毁消息队列，因此更好的做法是`signal(SIG_INT, func)`注册打断信号处理函数，这样就可以正常结束了。
+但是这样写完程序后由于while1循环，只能通过ctrl+C打断进程来退出，这样异常终止永远执行不了销毁消息队列，因此更好的做法是`signal(SIG_INT, func)`注册打断信号处理函数，这样就可以销毁了。
+
+或者使用`ipcrm msg id号`命令来删除对应id号的消息队列。
+
 * 发送方：`snder.c`，创建消息结构体向消息队列发送消息：
 ```cpp
 #include <stdio.h>

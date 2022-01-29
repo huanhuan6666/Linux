@@ -1,3 +1,6 @@
+> 呵呵Linux太多了，继续胡言乱语🤭
+
+
 # 高级IO
 ## 非阻塞IO与有限状态机编程
 ### 阻塞IO和非阻塞IO
@@ -723,7 +726,7 @@ int msgctl(int msqid, int cmd, struct msqid_ds *buf); //控制消息队列，比
 	* msgtype可以实现一种简单的**接收优先级**。如果msgtype为0，就获取队列中的第一个消息。如果它的值大于零，将获取具有相同消息类型的第一个信息。如果它小于零，就获取类型等于或小于msgtype的绝对值的第一个消息。
 	
 
-* 实例
+* 实例一：消息队列的创建和使用
 我们使用IPC实际上就是**自己封装协议**，我们定义消息类型为：
 ```cpp
 struct msg_st
@@ -737,6 +740,13 @@ struct msg_st
 让rcver接收者创建和销毁消息队列，snder获取创建好的消息队列。完整代码见：[msg.md](https://github.com/huanhuan6666/Linux/blob/main/msg.md)。
 
 【参考文章】：[Linux进程间通信——消息队列](https://blog.csdn.net/ljianhui/article/details/10287879)
+
+* 实例二：ftp实例
+示例一只是简单展示了消息队列的创建和使用，但是完全没有体现出消息队列的优势：**双工**，在实例一里表现的还是像个管道。
+
+而且有个疑问就是：为什么消息结构体中第一个成员非得是`long mtype`？下面我们就来解决这两个问题：
+
+
 #### 信号量数组sem
 
 #### 共享内存shm

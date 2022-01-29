@@ -713,12 +713,12 @@ int msgctl(int msqid, int cmd, struct msqid_ds *buf); //控制消息队列，比
 	* 和其他两个IPC机制一样，程序必须提供一个**键key**来命名某个**特定的**消息队列；msgflg是一个**权限标志**，表示消息队列的访问权限，它与**文件的访问权限**一样。
 	* msgflg可以与`IPC_CREAT`做或操作，表示当**key所命名**的消息队列**不存在时创建**一个消息队列，如果key所命名的消息队列存在时，IPC_CREAT标志会被**忽略**，而只返回一个标识符。
 	* msg_ptr是一个指向准备发送消息的指针，但是消息的数据结构却有一定的要求，指针msg_ptr所指向的消息结构一定要是以一个`long mtype`成员变量开始的结构体，接收函数将用这个成员来确定**消息的类型**。所以消息结构要定义成这样：
-```cpp
-struct my_message{
-    long int message_type;
-    /* The data you wish to transfer*/
-};
-```
+	```cpp
+	struct my_message{
+	    long int message_type;
+	    /* The data you wish to transfer*/
+	};
+	```
 	* msg_sz是msg_ptr指向的**消息的长度**，注意是消息的长度，而**不是整个结构体的长度**，也就是说msg_sz是不包括`long mtype`的长度。
 	* msgtype可以实现一种简单的**接收优先级**。如果msgtype为0，就获取队列中的第一个消息。如果它的值大于零，将获取具有相同消息类型的第一个信息。如果它小于零，就获取类型等于或小于msgtype的绝对值的第一个消息。
 	

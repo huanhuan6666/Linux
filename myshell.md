@@ -108,6 +108,7 @@ execvp(res.gl_pathv[0], res.gl_pathv); //文件名及参数列表
 那么我们其实可以以root身份改变某个用户的**登录shell**为我们自己写的`myshell`映像的路径。
 
 比如创建一个test用户：
+
 ![image](https://user-images.githubusercontent.com/55400137/150355183-99438ae3-753e-4b67-aebe-bd24bd733e4a.png)
 
 然后`sudo -i`暂时以root用户身份将文件cp到`/uer/bin/local/myshell`文件。

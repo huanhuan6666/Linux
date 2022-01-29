@@ -527,3 +527,97 @@ lokc(fd, F_ULOCK, 0);
 实现见`mypipe.md`
 
 ## 进程间通信(IPC)
+### 同一台主机上的进程
+#### 管道
+IPC的管道机制是内核提供的功能，管道文件**均由内核创建**，**单工**通信，并且有**自同步机制**，区分命名管道和匿名管道：
+> **单工**通信模式：数据传输为**单向**，固定一端为读端一端为写端。
+* 命名管道
+
+在Linux的man手册中，**命名管道就叫`FIFO`**，匿名管道才叫`pipe`。因此管道其实就是个**队列**，我们之前线程管道实际上也是个队列，说明管道和队列的行为是一致的。
+之前文件系统讲过文件类型有：`dcb-lsp`，命名管道就是磁盘上一个文件类型为`[p]`的**管道文件**，因为是文件所以使用方式平平无奇：用`open`
+
+相关函数：
+```cpp
+
+```
+* 匿名管道
+
+**内核创建**的，没有名字的管道文件，`ls`**看不到**，就像临时文件那样，一般用于**父子进程**之间的通信。
+> 临时文件：
+> ```cpp
+> FILE * tmpfile(void); // 返回一个FILE流指针，而不用给它名字
+> ```
+> 以二进制更新模式(wb+)创建**临时文件**。被创建的临时文件会在流关闭的时候或者在程序终止的时候**自动删除**，也就是说我们不关心这个文件叫什么名字，返回一个FILE指针，我们只管用指针操纵
+> 这个文件。
+
+由于没有办法在磁盘上看到匿名管道文件（没有名字），所以如果进程之间**没有亲缘关系**那么就**无法使用同一个**匿名管道，而如果fork的话子进程会duplicate父进程的打开文件，因此可以使用同一个。
+匿名管道创建函数：
+```cpp
+int pipe(int pipefd[2]);
+/*    The array pipefd is used to return two
+ *    file  descriptors  referring to the ends of the pipe.  pipefd[0] refers
+ *    to the read end of the pipe.  pipefd[1] refers to the write end of  the
+ *    pipe. 
+ *    写端写入的数据将**被内核缓存**直到读端开始读 */
+```
+pipefd就是个输入指针，函数内部将修改数组元素为**文件描述符**使得`pipefd[0]`为**读端**，`pipefd[1]`为**写端**。
+
+父进程pipe之后获得两个fd，再fork，这时我们根据读写需要在父子进程内关闭不用的fd（因为fork后父子进程都有读写两个fd），当然不关也可以但是可能有出错隐患。如下：
+```cpp
+#define BUFSIZE 1024
+int main()
+{
+	int pipefd[2];
+	char buf[BUFSIZE];
+	pid_t pid;
+	if(pipe(pipefd) < 0)
+	{
+		perror("pipe()");
+		exit(1);
+	}
+	pid = fork();
+	if(pid < 0)
+	{
+		perror("fork()");
+		exit(1);
+	}
+	if(pid == 0) //child read
+	{
+		close(pipefd[1]); //0为读1为写
+		int len = read(pipefd[0], buf, BUFSIZE);
+		write(1, buf, len); //写到标准输出
+		close(pipefd[0]);
+		exit(0); //子进程退出
+	}
+	else // parent write
+	{
+		close(pipefd[0]);
+		write(pipefd[1], "hello!", 6); //写到标准输出
+		close(pipefd[1]);
+		wait(NULL); //收尸子进程，就是子进程那点pid号退出状态和运行时间等等少量信息（内存和资源在退出时全部释放了也就是“死了”
+		exit(0); 
+	}
+}
+```
+更贴近实际的模型：S/C服务器，C端父进程用socket获取S发来的数据后fork子进程，父子进程通过**匿名管道**通信，子进程exec变成mpg123来解析管道内的数据包：
+```cpp
+if(pid == 0) //child read
+{
+	close(pipefd[1]); //0为读1为写
+	dup2(pipefd[0], 0); //输入重定向到管道的读端
+	close(pipefd[0]);
+	int fd = open("/dev/null", O_RDWR);
+	dup2(fd, 1);
+	dup2(df, 2);
+	execl("/usr/bin/mpg321", "mpg321", "-", NULL); //-表示从标准输入读数据，之前已经重定向过了
+	perror("execl()"); //能执行到这步说明exec一定错了，否则内存映像早变了
+	exit(1);
+}
+```
+对于`mpg321`的使用：`cat jay01.mp3 | mpg321 -`其中-表示从标准输入获取文件。
+#### XSI -> SysV
+
+### 不同主机上的进程
+#### 网络套接字socket
+* 封装协议
+协议就是通信双方约定的格式

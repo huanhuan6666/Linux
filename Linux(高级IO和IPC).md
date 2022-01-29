@@ -397,7 +397,7 @@ struct iovec {
 【参考文章】：
 [mmap是什么 为什么 怎么用](https://www.jianshu.com/p/57fc5833387a)
 
-[浅谈Linux内存完整的管理机制](https://github.com/0voice/kernel_memory_management/blob/main/%E2%9C%8D%20%E6%96%87%E7%AB%A0/%E6%B5%85%E8%B0%88Linux%E5%86%85%E5%AD%98%E7%AE%A1%E7%90%86%E6%9C%BA%E5%88%B6.md)
+[浅谈Linux内存完整的管理机制](https://github.com/0voice/kernel_memory_management/blob/main/%E2%9C%8D%20%E6%96%87%E7%AB%A0/%E6%B5%85%E8%B0%88Linux%E5%86%85%E5%AD%98%E7%AE%A1%E7%90%86%E6%9C%BA%E5%88%B6)
 
 [深入浅出Linux内存管理](https://github.com/0voice/kernel_memory_management/blob/main/%E2%9C%8D%20%E6%96%87%E7%AB%A0/%E6%B7%B1%E5%85%A5%E6%B5%85%E5%87%BAlinux%E5%86%85%E5%AD%98%E7%AE%A1%E7%90%86%EF%BC%88%E4%B8%80%EF%BC%89.md)
 ```cpp
@@ -524,7 +524,7 @@ lokc(fd, F_ULOCK, 0);
 
 不好的一点就是没有实现**权限封装**，比如写者可以随意调用read函数/读者同样可以调用write函数，可以像Unix文件系统那样再次进行封装，在系统打开表中增加**权限项**，每次读写操作时先判断权限是否满足。
 
-实现见`mypipe.md`
+实现见[mypipe.md](https://github.com/huanhuan6666/Linux/blob/main/mypipe.md)
 
 # 进程间通信(IPC)
 ## 同一台主机上的进程

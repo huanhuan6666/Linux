@@ -734,7 +734,7 @@ struct msg_st
         int chinese;
 };
 ```
-让rcver接收者创建和销毁消息队列，snder获取创建好的消息队列。完整代码见：`msg.md`。
+让rcver接收者创建和销毁消息队列，snder获取创建好的消息队列。完整代码见：[msg.md](https://github.com/huanhuan6666/Linux/blob/main/msg.md)。
 
 【参考文章】：[Linux进程间通信——消息队列](https://blog.csdn.net/ljianhui/article/details/10287879)
 #### 信号量数组sem

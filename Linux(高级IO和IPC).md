@@ -463,7 +463,7 @@ mmap可以当作malloc那样使用**动态分配内存**，即不依赖于任何
 ```cpp
 mmap(NULL, MEMSIZE, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
 ```
-匿名映射会将一个**内核创建**的全为进制零的**匿名文件文件**映射到虚拟内存中。由于子进程会duplicate父进程的内存空间，因此它们会映射到**同一个**匿名文件从而实现通信。
+匿名映射会将一个**内核创建**的全为进制零的**匿名文件**映射到虚拟内存中。由于子进程会duplicate父进程的内存空间，因此它们会映射到**同一个**匿名文件从而实现通信。
 
 代码如下：子进程写匿名文件，父进程读，实现通信。
 ```cpp
@@ -744,12 +744,141 @@ struct msg_st
 * 实例二：ftp实例
 示例一只是简单展示了消息队列的创建和使用，但是完全没有体现出消息队列的优势：**双工**，在实例一里表现的还是像个管道。
 
-而且有个疑问就是：为什么消息结构体中第一个成员非得是`long mtype`？下面我们就来解决这两个问题：
+而且有个疑问就是：为什么消息结构体中**第一个成员**非得是`long mtype`？下面我们就来解决这两个问题：
 
+FTP用一台机器请求另一台机器上的文件C/S模型，是不同主机上的进程间通信，这里我们只是简单展示原理，请求端和被请求端都在**同一台**主机上：
+C端向S端发送path请求，S端将path路径的文件**多次发送**数据包data，最后发送EOF(end of translate)结束传输。因此**被动端(S端)**的ftp进程一般都作为**守护进程**，等着别人的请求。
+
+下面我们**封装协议**，首先用消息队列机制来封装：
+```cpp
+#ifndef PROTO1_H__
+#define PROTO1_H__
+
+#define KEYPATH "/etc/services"
+#define KEYPROJ 'g'
+
+#define PATHMAX 1024
+#define DATAMAX 1024
+enum //一共三种类型的包，也就是三种消息
+{
+	MSG_PATH = 1,
+	MSG_DATA,
+	MSG_EOT
+};
+typedef struct msg_path_st
+{
+	long mtype = MAS_PATH;
+	char path[PATHMAX];
+	
+}msg_path_t;
+
+typedef struct msg_data_st
+{
+	long mtype = MAS_DATA;
+	char data[DATAMAX];
+	int datalen;
+}msg_data_t;
+
+typedef struct msg_eot_st
+{
+	long mtype = MAS_EOT;
+
+}msg_eot_t;
+
+union msg_s2c_un //通过共用体C端收到S端的包后直接打印mtype来确定到底是eof包还是data包
+{
+	long mtype; //由于msg的第一个成员都是mtype，所以可以直接打印msg_s2c_un.mtype来确定包类型
+	msg_data_t data;
+	mag_eot_t eot;
+};
+
+#endif
+```
+这里就体现出了`long mtype`的意义了，C端可能从S端收到两种类型的包：`EOF`或者`data`包，必须通过`mtype`来区分。
+
+我们定义了**共用体**`msg_s2c_un`来通过直接输出`msg_s2c_un.mtype`来确定C端收到的到底是什么包，这也就体现出了**第一个成员**设置成`long mtype`的意义了。
 
 #### 信号量数组sem
+之前我们也讲过互斥量和信号量，但是都只涉及了**一种资源**，互斥量保证资源的互斥访问(资源**只有一个**)，信号量保证资源一定数量的访问，而一个进程同时需要**多种资源**时就用到信号量数组了。
+
+这就有点像**银行家算法**里的各种资源总数了，这就涉及到**死锁**问题了。
+
+信号量数组同样也是PV操作，取资源和放资源，展开说也很多还是看手册吧。
 
 #### 共享内存shm
+
+之前的共享内存是使用**mmap**来做的，mmap是完成**文件**的映射，即使是匿名方式也不过是创建了个**匿名文件**。
+
+这里的共享内存是Sys V的机制，同样要：
+```cpp
+shmget(); //创建共享内存
+shmat();  //将共享内存映射到本进程的内存空间
+shmdt(); //解除映射
+shmctl(); //控制
+```
+Sys V提供的共享内存机制是在**内核**里特地留下的**共享内存区**，该内存区能够被需要的进程映射到**自身的内存空间**，原理图如下：
+
+![image](https://user-images.githubusercontent.com/55400137/151685817-474cf15b-b05d-4808-8750-31c9aa82dd82.png)
+
+共享内存允许两个或更多进程访问**同一块内存**，当然上面已经解释过，这是通过**映射**到**内核的共享内存区**实现的，创建共享内存的流程如下：
+
+![image](https://user-images.githubusercontent.com/55400137/151685749-1f0cafa1-b430-457a-99ae-efad10d292f3.png)
+
+
+下面用这种机制完成mmap例子中的内容：父子进程共享内存实现通信
+```cpp
+#define MEM_SIZE 1024
+int main()
+{
+	pid_t pid;
+	char *ptr;
+	int shmid = shmget(IPC_PRIVATE, MEM_SIZE); //创建共享内存
+	if(shmid < 0)
+	{
+		perror("shmget()");
+		exit(1);
+	}
+	
+	pid = fork();
+	if(pid < 0)
+	{
+		perror("fork()");
+		exit(1);
+	}
+	if(pid == 0) //child write
+	{
+		ptr = shmat(shmid, NULL, 0); //子进程将共享内存映射到自己的内存空间，第二个参数NULL让shmat自己找一块内存并且返回首地址	
+		if(ptr == (void*)1)
+		{
+			perror("shmat()");
+			exit(1);
+		}
+		strcpy(ptr, "hello!"); //子进程写
+		shmdt(shmid); //解除映射
+		exit(0);
+	}
+	else //parent read
+	{
+		wait(NULL); //等子进程写并收尸
+		ptr = shmat(shmid, NULL, 0); //父进程将共享内存映射到自己的内存空间
+		if(ptr == (void*)1)
+		{
+			perror("shmat()");
+			exit(1);
+		}
+		puts(ptr);
+		shmdt(shmid);
+		shmctl(shmid, IPC_RMID, NULL); //销毁
+	}
+	shmctl();
+	exit(0);
+}
+```
+【参考文章】： [进程间通信之共享内存](https://zhuanlan.zhihu.com/p/68620832)	[共享内存的用法](https://zhuanlan.zhihu.com/p/147826545)
+
+使用起来是比mmap要麻烦点，关于mmap和shm的区别见文章：[mmap映射区和shm共享内存的区别总结](https://blog.csdn.net/hj605635529/article/details/73163513)
+
+粗略来看，mmap映射的是文件而shm映射的是内核中的共享内存区。
 
 ## 不同主机上的进程
 ### 网络套接字socket

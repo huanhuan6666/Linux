@@ -912,7 +912,37 @@ struct st
 * 类型长度问题：
 在不同机器上，不同类型的数据字节长度可能不同，比如int可能占4字节也可能占2字节。并且不同机器可能对于有符号和无符号的约定也不同。
 
-解决：统一类型：`int32_t`表示32位有符号整型、`uint32_t`表示32位无符号整型、`int64_t`表示64为带符号整型。
-#### 报式套接字
+解决方法：统一类型：`int32_t`表示32位有符号整型、`uint32_t`表示32位无符号整型、`int64_t`表示64为带符号整型。
+
+#### socket函数
+socket函数原型：
+```cpp
+int socket(int domain, int type, int protocol);
+```
+这个函数建立一个协议族为domain、协议类型为type、协议编号为protocol的**套接字文件描述符**，我们直到Unix下文件类型为`dbc-lsp`，其中`[s]`就是**套接字文件**。
+* domain
+参数domain用于设置网络通信的域，函数socket()根据这个参数选择**通信协议族**。通信协议族在文件sys/socket.h中定义。常用的就是IPV4和IPV6
+```cpp
+   名称			   含义
+AF_INET,PF_INET		IPv4 Internet协议
+PF_INET6		IPv6 Internet协议
+```
+* type
+参数type用于设置套接字**通信类型**，主要有SOCKET_STREAM（**流式套接字**）、SOCK_DGRAM（**数据报式套接字**）等，后面将详细讲解。
+常用的如下：
+```cpp
+名称				含义
+SOCK_STREAM	提供有序的、可靠的、双向连接的字节流传输。支持带外数据传输，其实就是TCP连接
+SOCK_SEQPACKET  提供有序的、可靠的、双向连接的固定最大长度的数据报传输
+SOCK_DGRAM	无连接的，不可靠的固定最大长度的数据报传输，其实就是UDP连接
+SOCK_RAW	RAW类型，提供原始网络协议访问
+```
+* protocol
+参数protocol用于制定某个协议的**特定类型**，即type类型中的某个类型。通常某协议中**只有一种**特定类型，这样protocol**必须为0**
+
+#### 区分流式和报式
+**TCP是流式传输，UDP是报式传输**，
+#### 报式套接字UDP
 
 #### 流式套接字
+

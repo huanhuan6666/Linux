@@ -940,9 +940,49 @@ SOCK_RAW	RAW类型，提供原始网络协议访问
 * protocol
 参数protocol用于制定某个协议的**特定类型**，即type类型中的某个类型。通常某协议中**只有一种**特定类型，这样protocol**必须为0**
 
+* 几种常用的协议：
+```cpp
+tcp_socket = socket(AF_INET, SOCK_STREAM, 0);
+udp_socket = socket(AF_INET, SOCK_DGRAM, 0);
+raw_socket = socket(AF_INET, SOCK_RAW, protocol);
+```
+
 #### 区分流式和报式
-**TCP是流式传输，UDP是报式传输**，
+**TCP是流式传输，UDP是报式传输**，报式是封装一个**数据报**，有明确的**界限**；而流式传输是以**字节流**为单位，就像水管一样字节流传输后**无法区分**报文界限，也就是TCP的**粘包**现象。
+
+更详细的内容：[TCP为什么会粘包?背后原因令人暖心](https://segmentfault.com/a/1190000039691657)
+
 #### 报式套接字UDP
+UDP需要封装数据报，像消息队列那部分我们封装消息结构体一样，会涉及到**对齐问题**。
 
-#### 流式套接字
+实现时分为被动端和主动端
 
+* 被动端中：
+	* 取得socket
+	* 将socket绑定地址
+	* 收/发消息
+	* 关闭socket
+* 主动端中：
+	* 取得socket
+	* 将socket绑定地址
+	* 发/收消息
+	* 关闭socket
+**相关函数**：
+```cpp
+int inet_pton(int af, const char *src, void *dst); //将ipv4/ipv6地址转换成二进制形式 
+const char *inet_ntop(int af, const void *src, char *dst, socklen_t size); //将二进制地址转换成IP点分形式地址
+//第一个参数是协议族，由于是转换IP地址的，只能是AF_INET或者AF_INET6
+//src就是IP地址，dst为结果
+
+int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen); //绑定socket到IP地址和port
+//addr是个结构体，包含本协议需要设置的信息，比如TCP(UDP)/IP都需要IP地址和端口号，即我们用的AF_INET协议族，IP和port等信息需要自己填写到对应结构体。
+//不同的协议族要设置的内容不同，结构体本身可通过man查看协议族，里面都会有Adderss Format这一栏来介绍。
+
+ssize_t recvfrom(int sockfd, void *buf, size_t len, int flags,   //UDP的接收函数和TCP的recv函数区分 
+			struct sockaddr *src_addr, socklen_t *addrlen);
+ssize_t recv(int sockfd, void *buf, size_t len, int flags); /TCP的接收函数
+//可以看到recvfrom需要记录发送者的信息src_addr, addrlen，因为UDP报式传输是无连接的，我们必须记录发送者的信息
+//而recv则不用，因为TCP是面向连接的，对方是谁我们心知肚明，记录发送者信息纯粹多余
+```
+#### 流式套接字TCP
+基于字节流传输的TCP，就不涉及**对齐**的问题

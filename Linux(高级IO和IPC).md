@@ -981,8 +981,22 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen); //绑定so
 ssize_t recvfrom(int sockfd, void *buf, size_t len, int flags,   //UDP的接收函数和TCP的recv函数区分 
 			struct sockaddr *src_addr, socklen_t *addrlen);
 ssize_t recv(int sockfd, void *buf, size_t len, int flags); /TCP的接收函数
-//可以看到recvfrom需要记录发送者的信息src_addr, addrlen，因为UDP报式传输是无连接的，我们必须记录发送者的信息
+//可以看到recvfrom需要记录对面发送者的信息src_addr, addrlen，因为UDP报式传输是无连接的，我们必须记录发送者的信息
 //而recv则不用，因为TCP是面向连接的，对方是谁我们心知肚明，记录发送者信息纯粹多余
+
+ssize_t send(int sockfd, const void *buf, size_t len, int flags);  //TCP的发送函数
+
+ssize_t sendto(int sockfd, const void *buf, size_t len, int flags, //UDP的发送函数同样需要确定对面的接收者信息
+                    const struct sockaddr *dest_addr, socklen_t addrlen);
+
 ```
+
+**相关命令**：
+```cpp
+netstat -anu //查看UDP连接
+netstat -ant //查看TCP连接
+```
+完整实现见：[简易流式套接字实现(UDP).md]()
+
 #### 流式套接字TCP
 基于字节流传输的TCP，就不涉及**对齐**的问题

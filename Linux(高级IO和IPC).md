@@ -967,6 +967,7 @@ UDP需要封装数据报，像消息队列那部分我们封装消息结构体�
 	* 将socket绑定地址
 	* 发/收消息
 	* 关闭socket
+
 **相关函数**：
 ```cpp
 int inet_pton(int af, const char *src, void *dst); //将ipv4/ipv6地址转换成二进制形式 
@@ -996,7 +997,7 @@ ssize_t sendto(int sockfd, const void *buf, size_t len, int flags, //UDP的发�
 netstat -anu //查看UDP连接
 netstat -ant //查看TCP连接
 ```
-完整实现见：[简易流式套接字实现(UDP).md]()
+完整实现见：[简易流式套接字实现(UDP).md](https://github.com/huanhuan6666/Linux/blob/main/%E7%AE%80%E6%98%93%E6%B5%81%E5%BC%8F%E5%A5%97%E6%8E%A5%E5%AD%97%E5%AE%9E%E7%8E%B0(UDP).md)
 
 #### 流式套接字TCP
 基于字节流传输的TCP，就不涉及**对齐**的问题

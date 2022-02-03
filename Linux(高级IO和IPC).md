@@ -999,5 +999,9 @@ netstat -ant //查看TCP连接
 ```
 完整实现见：[简易流式套接字实现(UDP).md](https://github.com/huanhuan6666/Linux/blob/main/%E7%AE%80%E6%98%93%E6%B5%81%E5%BC%8F%E5%A5%97%E6%8E%A5%E5%AD%97%E5%AE%9E%E7%8E%B0(UDP).md)
 
+也涉及了对于**广播/多播**的实现。
+
 #### 流式套接字TCP
 基于字节流传输的TCP，就不涉及**对齐**的问题
+
+

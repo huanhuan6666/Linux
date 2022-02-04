@@ -1076,6 +1076,7 @@ SYN+ACK发出去之后S端**不再保留任何**有关此连接的信息，因�
 	* 取得socket
 	* 将socket绑定地址bind
 	* 将socket设置成监听模式listen
+	* 接收连接请求accept
 	* 收/发消息
 	* 关闭socket
 * C端/主动端中：

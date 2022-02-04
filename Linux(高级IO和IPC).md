@@ -964,7 +964,7 @@ UDP需要封装数据报，像消息队列那部分我们封装消息结构体�
 	* 关闭socket
 * 主动端中：
 	* 取得socket
-	* 将socket绑定地址
+	* 将socket绑定地址（可省略）
 	* 发/收消息
 	* 关闭socket
 
@@ -1068,4 +1068,19 @@ SYN+ACK发出去之后S端**不再保留任何**有关此连接的信息，因�
 [https://www.eet-china.com/mp/a44399.html](TCP各种面试题作答)
 
 
-流式套接字的完整实现见：[简易流式套接字实现(UDP).md]
+流式套接字的完整实现见：[简易流式套接字实现(UDP).md]()
+
+基本流程如下：实现时同样分为被动端和主动端
+
+* S端/被动端中：
+	* 取得socket
+	* 将socket绑定地址bind
+	* 将socket设置成监听模式listen
+	* 收/发消息
+	* 关闭socket
+* C端/主动端中：
+	* 取得socket
+	* 将socket绑定地址（可省略）
+	* 发送连接请求connect
+	* 发/收消息
+	* 关闭socket

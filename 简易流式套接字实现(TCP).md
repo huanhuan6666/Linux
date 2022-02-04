@@ -15,10 +15,12 @@
 ```cpp
 int listen(int sockfd, int backlog); //服务器端开始监听，backlog定义了sockfd上半连接队列的最大长度
 //但是由于TCPcookie抛弃了半连接队列，这里我们通常认为是全连接队列的大小，即能够建立TCP连接的最大数目
-int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen); //接收半连接队列里的第一个连接请求，然后创建一个新的套接字与请求连接，并返回新的文件描述符
-// 因为TCP连接是一对一的，而我们只给服务器指定了一个端口，难道就只能完成一个连接吗(毕竟一对一)？显然不合理，accept就是创建一个新的套接字去和请求连接，然后自己的套接字端口接着监听，合情合理
-ssize_t send(int sockfd, const void *buf, size_t len, int flags);  //TCP的发送函数
+int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen); 
+//接收半连接队列里的第一个连接请求，然后创建一个新的套接字与请求连接，并返回新的文件描述符
+// 因为TCP连接是一对一的，而我们只给服务器指定了一个端口，难道就只能完成一个连接吗(毕竟一对一)？
+//显然不合理，accept就是创建一个新的套接字去和请求连接，然后自己的套接字端口接着监听，合情合理
 
+ssize_t send(int sockfd, const void *buf, size_t len, int flags);  //TCP的发送函数
 ssize_t sendto(int sockfd, const void *buf, size_t len, int flags, //UDP的发送函数同样需要确定对面的接收者信息
                     const struct sockaddr *dest_addr, socklen_t addrlen);
 ```

@@ -1066,3 +1066,6 @@ SYN+ACK发出去之后S端**不再保留任何**有关此连接的信息，因�
 
 【更多参考】：[https://leetcode-cn.com/circle/discuss/aqTOW4/](TCP面试问题详解)
 [https://www.eet-china.com/mp/a44399.html](TCP各种面试题作答)
+
+
+流式套接字的完整实现见：[简易流式套接字实现(UDP).md]

@@ -3,7 +3,7 @@
 ### proto.h
 
 
-### server.h服务器端实现
+### server.c服务器端实现
 * 服务器端的实现基本流程如下:
 	* 取得socket
 	* 将socket绑定地址bind
@@ -98,6 +98,11 @@ int main()
 	exit(0);
 }
 ```
+* 服务器端socket获取套接字后，必须bind绑定端口和IP，因为是被动端，必须让别人知道自己在哪里
+* 绑定好后开始listen监听客户端发来的连接请求即可，收到请求accept接收会创建出另一个套接字和请求连接，自己继续listen
+* accept时服务器端能够获取到请求连接的客户端的IP和端口信息，我们的代码就是把该信息打印出来了。
+
+
 之后`./server`启动服务器后，用`netstat -ant`查看所有TCP连接如下：
 
 ![image](https://user-images.githubusercontent.com/55400137/152514574-7cc6dcb0-ac95-466c-b89e-1788a4112ddb.png)
@@ -116,6 +121,121 @@ nc命令**创建**了一个**TCP套接字**并向指定的127.0.0.1 1937端口�
 
 ![image](https://user-images.githubusercontent.com/55400137/152517243-41fa73ad-7ad1-4f2f-8dc8-e10b56681ee4.png)
 
+### 服务器端的并发实现
+上文已经提到服务器接受连接请求后，accept是创建一个新的套接字描述符来与其连接的，然后自己仍然listen监听请求。
+
+这样一来如果服务器端建立了很多连接，那么一个进程就需要处理很多个连接，显然不好，很多连接**来不及处理**，因此不如fork出子进程来处理每个连接，实现如下：
+
+```cpp
+while(1)
+{
+	newfd = accept(sfd, (void *)&raddr, &rlen); //接收连接并且记录发起连接的客户端地址
+	if(newfd < 0)
+	{
+
+		perror("accept()");
+		exit(1);
+	}
+	pid = fork();
+	if(pid < 0)
+	{
+		perror("fork()");
+		exit(1);
+	}
+	if(pid == 0) //子进程继承了父进程的文件描述符表，当然包括那个套接字newsfd
+	{
+		inet_ntop(AF_INET, &raddr.sin_addr, ipstr, IPSTRSIZE);
+		printf("Clinet:%s:%d\n", ipstr, ntohs(raddr.sin_port));
+		server_job(newfd);
+		close(newfd);	
+		exit(0); //处理完后子进程直接退出
+	}
+	else //父进程需要关闭本进程的文件描述符表的newfd，如果不关套接字无法正常关闭
+	{
+		close(newfd);
+		wait(NULL);
+		continue;
+	}
+}
+```
+* 子进程处理完后需要**及时退出**，否则可能fork指数增长
+* 父进程需要把自己本进程的newfd**及时关闭**，因为父子进程newfd指向的是同一个file结构体，子进程处理完后close(newfd)**引用计数**不为0，套接字就无法及时关闭
+* 如果这样的话，干脆在子进程那里直接`close(sfd);`也可以，毕竟它也用不到，避免不必要的错误吧还是。。
+
+### client.c服务器端实现
+
+这里我们不再拘泥于使用`recv`这种函数了，由于socket返回的本身就是一个文件描述符，我们完全可以**用文件操作来对套接字进行读写**。实现如下：
+```cpp
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include "proto.h"
+#include <sys/types.h> 
+#include <sys/socket.h>
+#include <netinet/in.h>
 
 
+int main(int argc, char **argv)
+{
+	if(argc < 2)
+	{
+		fprintf(stderr, "Usage...\n");
+		exit(1);
+	}
+	int sfd;
+	FILE *fp;
+	long long stamp;
+	struct sockaddr_in raddr;
+	sfd = socket(AF_INET, SOCK_STREAM, 0);
+	if(sfd < 0)
+	{
+		perror("socket()");
+		exit(1);
+	}
+	//bind();绑定端口可省略，会自动分配一个端口
+	raddr.sin_family = AF_INET; //填写服务器的IP和端口信息
+	raddr.sin_port = htons(SERVER_PORT);
+	inet_pton(AF_INET, argv[1], &raddr.sin_addr); //从命令行获取想连接的服务器IP
+	if(connect(sfd, (void*)&raddr, sizeof(raddr)) < 0) //尝试连接服务器
+	{
+		perror("connect()");
+		exit(1);
+	}
+
+	//recv(); 这里不用recv，直接来个文件操作完全OK, sfd就是个文件描述符
+	fp = fdopen(sfd, "r+");//用fdopen打开文件描述符获取FILE*
+	if(fp == NULL)
+	{
+		perror("fdopen()");
+		exit(1);
+	}
+	if(fscanf(fp, FMT_STAMP, &stamp) < 1)
+	{
+		fprintf(stderr, "Bad frmat!\n");
+		exit(1);
+	}
+	else
+	{
+		fprintf(stdout, "RECEIVE STAMP: %lld\n", stamp);
+	}
+	fclose(fp);
+	close(sfd);
+	exit(0);
+}
+```
+
+* 用fdopen打开套接字的文件描述符，返回一个FILE指针，后续操作就变成**标准IO**了，当然也可以直接用系统调用IO比如read来操作。
+* 同样客户端不需要显式bind一个端口，系统会自动分配。只需要指定要connect的服务器的IP和端口即可，向服务器端发送请求
+* 三次握手后connect成功结束，连接已经建立，就可以向套接字读写内容了。
+
+./server先启动服务器，然后./client与服务器的TCP连接，得到如下结果:
+
+服务器端知道对面的客户端的IP和端口号：
+
+![image](https://user-images.githubusercontent.com/55400137/152625899-4acea03a-446d-4534-8a08-7b6f4ec00a27.png)
+
+客户端也收到了服务器发来的时戳：
+
+![image](https://user-images.githubusercontent.com/55400137/152625936-647dd169-1fa5-49e6-9792-87fe980d9d9b.png)
 

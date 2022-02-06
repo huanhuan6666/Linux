@@ -1088,11 +1088,90 @@ SYN+ACK发出去之后S端**不再保留任何**有关此连接的信息，因�
 
 #### TCP图片页面抓包分析实例
 
-首先在Ubuntu上`sudo apt-get install apache2`安装配置Apache2 web服务器，之后就会生成`/var/www`文件夹。
+首先在Ubuntu上`sudo apt-get install apache2`安装配置Apache2 web服务器(阿帕奇服务器是流行的web服务器软件)，之后就会生成`/var/www`文件夹。
 
 关于linux的`/var/www/html`是**web服务器的默认目录**，放在该目录下的文件，都可以通过浏览器IP访问，即`127.0.0.1/file`形式。
 
 我们的工作就是把一个图片文件放到该文件夹下面(需要root权限)，用浏览器访问`127.0.0.1/test.jpg`，然后**抓包分析**。
 
 ![image](https://user-images.githubusercontent.com/55400137/152676691-e5e892dd-d2cb-40d7-9b7c-741b6fc578df.png)
+
+为了避免浏览器**缓存干扰**，首先需要清空浏览器历史缓存，然后抓包，得到http和TCP的全过程，可以右键追踪流来查看：
+
+![image](https://user-images.githubusercontent.com/55400137/152682912-59f6fcf5-a61a-42cc-9148-ed44c25a0fdf.png)
+
+追踪流内容如下：红色为客户端的请求内容，蓝色为服务器的回复内容
+
+![image](https://user-images.githubusercontent.com/55400137/152682937-5c3a677b-456a-40cf-8d5f-54a7e2a45699.png)
+
+**修改客户端程序**：
+
+将之前的客户端直接按照http1.1协议，向80端口请求`/test.jpg`文件，因为web服务器的默认根目录为`/var/www/html`，所以实际上请求的就是`/var/www/html/test.jpg`文件。完整代码如下：
+
+```cpp
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/types.h> 
+#include <sys/socket.h>
+#include <netinet/in.h>
+#define BUFSIZE 1024
+
+int main(int argc, char **argv)
+{
+	if(argc < 2)
+	{
+		fprintf(stderr, "Usage...\n");
+		exit(1);
+	}
+	int sfd, len;
+	FILE *fp;
+	struct sockaddr_in raddr;
+	char rbuf[BUFSIZE];
+	sfd = socket(AF_INET, SOCK_STREAM, 0);
+	if(sfd < 0)
+	{
+		perror("socket()");
+		exit(1);
+	}
+	
+	raddr.sin_family = AF_INET; //填写服务器的IP和端口信息
+	raddr.sin_port = htons(80); //80端口web服务器(阿帕奇服务器)
+	inet_pton(AF_INET, argv[1], &raddr.sin_addr); //从命令行获取想连接的服务器IP
+	if(connect(sfd, (void*)&raddr, sizeof(raddr)) < 0) //尝试连接服务器
+	{
+		perror("connect()");
+		exit(1);
+	}
+
+	fp = fdopen(sfd, "r+");//用fdopen打开文件描述符获取FILE*
+	if(fp == NULL)
+	{
+		perror("fdopen()");
+		exit(1);
+	}
+	fprintf(fp, "GET /test.jpg\r\n\r\n"); //向web服务器发送请求
+	fflush(fp); //全缓冲不刷新就不会输出
+	while(1)
+	{
+		len = fread(rbuf, 1, BUFSIZE, fp); //从web服务器获取图片文件
+		if(len  == 0)
+			break;
+		fwrite(rbuf, 1, len, stdout); //打印到终端
+	
+	}
+	
+	fclose(fp);
+	close(sfd);
+	exit(0);
+}
+```
+* 我们不再包**自己封装的协议**头文件`"proto.h"`，而是直接使用http1.1协议
+* 客户端想要连接的端口也不再是之前的1937，而是阿帕奇web服务器的80端口
+* 通过标准IO向套接字发送请求信息`"GET /test.jpg"`，来达到和浏览器访问图片一样的操作
+
+由于我们是直接将图片文件打印到终端上，是一堆乱码，通过`./client_web 127.0.0.1 > /tmp/out`将文件重定向到`/tmp/out`，然后`eog /tmp/out`用eog解码图片，就可以查看图片了：
+
+![image](https://user-images.githubusercontent.com/55400137/152683228-369b6011-dbf4-454f-890f-0c8631d1583a.png)
 

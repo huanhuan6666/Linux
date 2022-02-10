@@ -625,15 +625,18 @@ if(pid == 0) //child read
 对于管道命令`cmdA | cmdB`：
 
 1)首先从 shell 创建子进程 A，然后在 shell 和 A 之间建立一个管道，其中 shell 保留读取端，A 进程保留写入端
+
 2)然后 shell 再创建子进程 B。这又是一次 fork，所以，shell 里面保留的读取端的 fd 也被复制到了子进程 B 里面。这个时候，相当于 shell 和 B 都保留读取端，然后 shell 主动关闭读取端，就变成了一管道，写入端在 A 进程，读取端在 B 进程。
+
 3)接下来AB两个进程将这个管道的两端和输入输出关联起来。这就要用到 dup2 系统调用了。`int dup2(int oldfd, int newfd);`
 
-A 进程中，写入端可以做这样的操作：dup2(fd[1],STDOUT_FILENO)，将 STDOUT_FILENO（也即第一项）不再指向标准输出，而是指向创建的管道文件
+A 进程中，写入端可以做这样的操作：dup2(fd[1],STDOUT_FILENO)，将 STDOUT_FILENO（也即第一项）不再指向标准输出，而是指向创建的管道文件;
+
 在 B 进程中，读取端可以做这样的操作，dup2(fd[0],STDIN_FILENO)，将 STDIN_FILENO 也即第零项不再指向标准输入，而是指向创建的管道文件
+
 大致像下面这样：
 
-![image](https://user-images.githubusercontent.com/55400137/151652526-9204aafc-f3d8-4797-bafa-c12f28b62dbc.png)
-
+![image](https://user-images.githubusercontent.com/55400137/153365854-53095e0c-a236-4979-806b-640fcdc1c0b5.png)
 
 #### 命名管道
 

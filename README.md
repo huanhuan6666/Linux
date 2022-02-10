@@ -7,17 +7,16 @@
 但是不了解内核的话系统概念还是难以建立。。
 
 > 什么《Linux内核设计实现》啥的感觉实在有点粗糙，其实本仓库的内容也是按照APUE来的，感觉APUE也没有那么圣经吧。。
+> 
 > 都是从库函数的角度自顶向下解释内核的一部分内容，内核的完整概念很难建立起来wwww，什么空中阁楼，甚至不如一些博客写的清楚（
 
 下面是一些感觉质量较高的博客：
 
 【参考文章】：
-关于Linux各部分原理的栏目：
+* 关于Linux各部分原理的栏目： [深入理解Linux实现](http://husharp.today/category/#Linux)
 
-[深入理解Linux实现](http://husharp.today/category/#Linux)
+* 关于从开机到Linux系统内核各项工作的代码解释有个简单的项目： [你管这玩意叫操作系统](https://github.com/sunym1993/flash-linux0.11-talk)
 
-关于从开机到Linux系统内核各项工作的代码解释有个简单的项目：
 
-[你管这玩意叫操作系统](https://github.com/sunym1993/flash-linux0.11-talk)
 
 当然理解还是不深刻，什么纸上得来。。。我寻思看完这些再手撸个简单内核吧wwwww

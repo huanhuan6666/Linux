@@ -622,15 +622,14 @@ if(pid == 0) //child read
 #### 管道命令
 比如`ls | grep `连接两个命令：即将一个进程的输出作为另一个进程的输入，这里用到的就是**匿名管道**，当命令里面包含一个**管道符**`|`时，就会先pipe再fork，当然涉及到shell进程的细节：
 
-对于管道命令`cmd1 | cmd2`：
-1) shell进程首先fork出子进程再exec变成cmd1，
+对于管道命令`cmdA | cmdB`：
 
-2) 然后cmd1先pipe后fork+exec得到cmd2，这时cmd1和cmd2已经被管道连接了，
+1)首先从 shell 创建子进程 A，然后在 shell 和 A 之间建立一个管道，其中 shell 保留读取端，A 进程保留写入端
+2)然后 shell 再创建子进程 B。这又是一次 fork，所以，shell 里面保留的读取端的 fd 也被复制到了子进程 B 里面。这个时候，相当于 shell 和 B 都保留读取端，然后 shell 主动关闭读取端，就变成了一管道，写入端在 A 进程，读取端在 B 进程。
+3)接下来AB两个进程将这个管道的两端和输入输出关联起来。这就要用到 dup2 系统调用了。`int dup2(int oldfd, int newfd);`
 
-3) 之后父子进程用dup2命令将标准输入输出重定向**连到管道上**，
-
-4) 之后就是关闭不需要的fd即可。
-
+A 进程中，写入端可以做这样的操作：dup2(fd[1],STDOUT_FILENO)，将 STDOUT_FILENO（也即第一项）不再指向标准输出，而是指向创建的管道文件
+在 B 进程中，读取端可以做这样的操作，dup2(fd[0],STDIN_FILENO)，将 STDIN_FILENO 也即第零项不再指向标准输入，而是指向创建的管道文件
 大致像下面这样：
 
 ![image](https://user-images.githubusercontent.com/55400137/151652526-9204aafc-f3d8-4797-bafa-c12f28b62dbc.png)

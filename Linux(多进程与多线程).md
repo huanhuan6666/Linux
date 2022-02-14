@@ -707,6 +707,22 @@ TTY = **控制终端名称**
 TPGID= 控制终端进程组ID（由控制终端修改，用于指示当前前台进程组）
 UID = 进程用户ID，0表示root用户
 
+客户端向服务器连接后，创建一个**会话**，展示**登录shell**，这就是个**会话**，在这个会话里面**shell是个进程组**，之后我们输入:`ps axj | grep 2288`得到如下：
+
+![image](https://user-images.githubusercontent.com/55400137/153831727-c5bce5b3-82cf-4b46-8b15-35d1cb25e83c.png)
+
+
+可以看到shell确实是个**单独进程组**，PID = PGID = SID，而`ps`和`grep`这两个进程**父进程都是shell**，在一个进程组PGID=3463中，而shell, ps, grep这三个进程在**同一个会话**SID=2288中。
+
+显然如果我们想自己创建一个用户守护进程，必须新建会话，因为shell这个会话必定**有控制终端**，只能另起炉灶即`setsid`函数；并且由于setsid不能由进程组组长调用，因此只能fork**子进程**调用，详细实现见下文。
+
+他们的控制终端都是`pts/0`，可以通过`tty`命令查看得到：`/dev/pts/0`，这个控制终端是和shell界面对应的。。不是什么真真意义上的终端，也就是说你再创建个shell界面tty就成了`pts/1`，多创建几个就依次是`pts/2, pts/3...`，比如我们创建三个shell界面，那么在第三个shell里输入`ps axj | grep bash`就会得到：
+
+![image](https://user-images.githubusercontent.com/55400137/153833779-e8e46f50-5131-4455-ad18-2b5ecf533246.png)
+
+从这上面看，差不多就是创建一个新的shell界面就有个**对应的新会话**，还是很好懂的。
+
+
 * 父进程ID为0的进程通常是内核进程，init进程例外。
 * 在ps的输出中，**内核守护进程**的名字用**方括号**括住。比如kswapd就是**内存换页**守护进程。
 * 大多数守护进程都是以root特权运行，UID=0，并且**所有**守护进程都**脱离终端控制**，因此**tty=?**
@@ -757,7 +773,7 @@ int make_protect()
 	dup2(fd, 1);
 	dup2(fd, 2);
 	setsid();
-	chdir("/");
+	chdir("/"); //切换工作目录为根目录
 	return 0;
 }
 int main()
@@ -799,6 +815,11 @@ int main()
 可是这个父进程也不是init进程1啊？查看那个进程发现父进程也是个守护进程，因此ubuntu的实际操作可能是先创建了一个守护进程，这个守护进程再fork依次。
 ```cpp
 1  1590  1590  1590 ?           -1 Ss    1000   0:00 /lib/systemd/systemd --user
+```
+
+当然Linux也提供了创建守护进程的系统调用：
+```cpp
+int daemon(int nochdir, int noclose); //nochdir为0则改变工作目录为根，noclose为0则重定向stdin,out,err到/dev/null
 ```
 更多的实现用户守护进程细节见文章:[守护进程](https://xie.infoq.cn/article/c3a40c88f95d3a1cb56045dc4)
 ### 系统日志的书写

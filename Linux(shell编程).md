@@ -50,10 +50,10 @@ chgrp root dir -R //对于目录的递归操作
 
 当然还有什么符号链接和硬链接啥的，在文件系统那部分都写清楚了。
 
-### shell脚本
+## shell脚本
 shell脚本功能强大（就是说什么语言都说自己强大，然后重要的一点是节省时间，把一堆命令写到一起解析，纯纯的调包，就看你怎么用了。
 
-#### 基本元素
+### 基本元素
 第一行的#不是注释，其他地方的#都是注释。第一行`#!/bin/bash`表示用这个bash来解析命令，比如：
 ```sh
 #!/bin/bash
@@ -64,3 +64,36 @@ echo $hello  #等同于echo ${hello}
 
 写完脚本后一般没有执行权限，因为默认644，手动改一下就行`chmod u+x 01hello.sh`，然后`./01hello.sh`
 
+### shell特性
+* 命令别名
+比如`ls -l`和`ll`效果几乎一致，是因为`ll`是`ls -alF`的别名，可以通过`alias`命令查看所有命令的别名：
+```cpp
+alias egrep='egrep --color=auto'
+alias fgrep='fgrep --color=auto'
+alias grep='grep --color=auto'
+alias l='ls -CF'
+alias la='ls -A'
+alias ll='ls -alF'
+alias ls='ls --color=auto'
+alias syenv='source /home/njucs/switchyard/syenv/bin/activate'
+```
+当然`alias`也可以自定义别名，按照给定格式修改就ok比如`alias ll = 'ls -ail'`。
+
+关于别名的详细配置在用户home目录下的`.bashrc`文件，也可以直接修改这个文件来指定**命令别名**
+
+* 命令替换
+用**单反引号**将命令括住，比如`ls `cat filename` -ail`将文件`filename`的内容输出到给`ls`命令。
+
+单反引号就表示括住的内容是一个**命令**，这种输入方式在shell命令行也常见，将内部的输出作为外部的输入。
+
+* 后台处理
+如果命令执行的时间比较长，那么可以让它在后台运行，格式为`nohup [commnd] &`，commnd是命令本身，这样输出内容不会输出到终端上，一般是输出到一个叫`nohup.out`的文件里。
+
+* 重定向和管道
+就是和进程文件描述符表相关，重定向有两种：`>`和`<`，>重定向输出一般是把输出fd=1的那个file指针指向自定义的文件file结构；<重定向输入则把输入fd=0那个file指针也指向自定义的文件file结构。
+
+比如`sort < file1.txt  > file2.txt`，就是把file1文件的内容输入给sort排序后输出到file2
+
+管道命令更加典中典，创建一个匿名管道文件，然后把file指针dup2到读进程的stdin，写进程的stdout。读写进程属于同一个进程组，**均由shell创建**，进程那部分有详细描述。
+
+### shell变量

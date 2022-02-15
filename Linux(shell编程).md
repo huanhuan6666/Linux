@@ -97,3 +97,10 @@ alias syenv='source /home/njucs/switchyard/syenv/bin/activate'
 管道命令更加典中典，创建一个匿名管道文件，然后把file指针dup2到读进程的stdin，写进程的stdout。读写进程属于同一个进程组，**均由shell创建**，进程那部分有详细描述。
 
 ### shell变量
+
+
+### 股票数据综合分析
+
+### shell IPC工具编写
+
+这两个实际例子都是shell脚本的经典应用，之后补吧还是。。

@@ -17,6 +17,6 @@
 
 * 关于从开机到Linux系统内核各项工作的代码解释有个简单的项目： [你管这玩意叫操作系统](https://github.com/sunym1993/flash-linux0.11-talk)
 
-
+* 有关内存管理：段式、页式、段页式的推演过程以及Linux如何架空Intel段式管理的内容见：[内存管理完全解析](https://jishuin.proginn.com/p/763bfbd248c0)
 
 当然理解还是不深刻，什么纸上得来。。。我寻思看完这些再手撸个简单内核吧wwwww
